@@ -1,7 +1,7 @@
 # Proyecto Avutardo
 
 [![CI](https://github.com/tenebrishv/avutardo/actions/workflows/ci.yml/badge.svg)](https://github.com/tenebrishv/avutardo/actions/workflows/ci.yml)
-[![Licencia: MIT (propuesta)](https://img.shields.io/badge/licencia-MIT%20(propuesta)-blue)](LICENSE)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue)](LICENSE)
 
 *[English version](README.en.md)*
 
@@ -47,7 +47,7 @@ flowchart LR
     hb <-.->|"LoRa 915–928 MHz"| ht
 ```
 
-- **Pico 2** (sin W, sin radio): el núcleo. Lee los sensores, decide el estado
+- **Pico 2** (sin radio): el núcleo. Lee los sensores, decide el estado
   del vuelo, maneja las cámaras y arma los paquetes de telemetría.
 - **Heltec a bordo:** el único transmisor del CanSat. Recibe los paquetes de la
   Pico, les suma el GPS y los transmite en 915–928 MHz (`X1`). No guarda estado.
@@ -109,4 +109,4 @@ Equipo de la UTN Facultad Regional Tierra del Fuego, con su docente tutor.
 
 ## Licencia
 
-[MIT](LICENSE). **Es una propuesta:** falta confirmarla con el docente tutor.
+[MIT](LICENSE).
