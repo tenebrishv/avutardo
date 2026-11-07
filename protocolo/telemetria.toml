@@ -1,0 +1,173 @@
+# ============================================================================
+#  PROVISORIO — formato de ejemplo para el simulador de la estación terrena.
+#
+#  El equipo todavía no definió el formato de telemetría. Estos campos salen
+#  de lo que pide el Anexo A v2 (X5, SN3, SN8, G3, G8, F1, F2, F3) para que el
+#  prototipo funcione; no son una decisión. Cuando el equipo traiga el formato
+#  real, se reemplaza este archivo y la estación terrena no cambia de código.
+# ============================================================================
+
+version = "0.1-provisorio"
+provisorio = true
+
+# Cómo viaja un paquete (PROVISORIO, también lo define el equipo):
+# una línea de texto ASCII, campos en el orden de este archivo, separados por
+# `separador` y terminada en `fin_de_linea`. Números con punto decimal.
+[paquete]
+codificacion = "ascii"
+separador = ","
+fin_de_linea = "\n"
+
+# Cada [[campo]] es un elemento de la lista. El orden en el archivo es el
+# orden en el paquete. `tipo`: int | float | str. `unidad`: SI, o vacía si el
+# campo no tiene unidad. `requisito`: el código del Anexo A v2 que lo pide.
+# `propuesta = true` marca un campo que no pide el anexo y que hay que llevar
+# a la definición del formato.
+
+[[campo]]
+nombre = "contador"
+tipo = "int"
+unidad = ""
+requisito = "F1"
+descripcion = "Paquetes transmitidos; persiste a través de reinicios"
+
+[[campo]]
+nombre = "tiempo_mision"
+tipo = "float"
+unidad = "s"
+requisito = "G3 F2"
+descripcion = "Tiempo de misión; persiste a través de reinicios"
+
+[[campo]]
+nombre = "hora"
+tipo = "str"
+unidad = ""
+requisito = "F3"
+descripcion = "Hora UTC del CanSat (DS3231), hh:mm:ss"
+
+[[campo]]
+nombre = "estado_fsw"
+tipo = "str"
+unidad = ""
+requisito = "G8"
+descripcion = "Estado del software de vuelo"
+
+[[campo]]
+nombre = "altitud"
+tipo = "float"
+unidad = "m"
+requisito = "X5 SN1"
+descripcion = "Altitud barométrica respecto de la rampa"
+
+[[campo]]
+nombre = "presion"
+tipo = "float"
+unidad = "Pa"
+requisito = "X5"
+descripcion = "Presión atmosférica (BME280)"
+
+[[campo]]
+nombre = "temperatura"
+tipo = "float"
+unidad = "°C"
+requisito = "X5 SN2"
+descripcion = "Temperatura interna (BME280)"
+
+[[campo]]
+nombre = "tension"
+tipo = "float"
+unidad = "V"
+requisito = "SN3 G7"
+descripcion = "Tensión del pack (INA226)"
+
+[[campo]]
+nombre = "corriente"
+tipo = "float"
+unidad = "A"
+requisito = "SN8 G7"
+descripcion = "Corriente del pack (INA226)"
+
+[[campo]]
+nombre = "acel_x"
+tipo = "float"
+unidad = "m/s²"
+requisito = "X5 SN5"
+descripcion = "Aceleración, eje x (LSM6DSV32X)"
+
+[[campo]]
+nombre = "acel_y"
+tipo = "float"
+unidad = "m/s²"
+requisito = "X5 SN5"
+descripcion = "Aceleración, eje y (LSM6DSV32X)"
+
+[[campo]]
+nombre = "acel_z"
+tipo = "float"
+unidad = "m/s²"
+requisito = "X5 SN5"
+descripcion = "Aceleración, eje z (LSM6DSV32X)"
+
+[[campo]]
+nombre = "rot_x"
+tipo = "float"
+unidad = "°/s"
+requisito = "X5 SN5"
+descripcion = "Velocidad de rotación, eje x (LSM6DSV32X)"
+
+[[campo]]
+nombre = "rot_y"
+tipo = "float"
+unidad = "°/s"
+requisito = "X5 SN5"
+descripcion = "Velocidad de rotación, eje y (LSM6DSV32X)"
+
+[[campo]]
+nombre = "rot_z"
+tipo = "float"
+unidad = "°/s"
+requisito = "X5 SN5"
+descripcion = "Velocidad de rotación, eje z (LSM6DSV32X)"
+
+[[campo]]
+nombre = "gps_hora"
+tipo = "str"
+unidad = ""
+requisito = "SN4"
+descripcion = "Hora UTC del GPS de la Heltec, hh:mm:ss"
+
+[[campo]]
+nombre = "gps_latitud"
+tipo = "float"
+unidad = "°"
+requisito = "X5 SN4"
+descripcion = "Latitud, grados decimales (norte positivo)"
+
+[[campo]]
+nombre = "gps_longitud"
+tipo = "float"
+unidad = "°"
+requisito = "X5 SN4"
+descripcion = "Longitud, grados decimales (este positivo)"
+
+[[campo]]
+nombre = "gps_altitud"
+tipo = "float"
+unidad = "m"
+requisito = "X5 SN4"
+descripcion = "Altitud GPS sobre el nivel del mar"
+
+[[campo]]
+nombre = "gps_satelites"
+tipo = "int"
+unidad = ""
+requisito = "X5 SN4"
+descripcion = "Satélites en uso"
+
+[[campo]]
+nombre = "eco_comando"
+tipo = "str"
+unidad = ""
+requisito = "G15"
+propuesta = true
+descripcion = "Último telecomando recibido y ejecutado (verificación en tierra)"
