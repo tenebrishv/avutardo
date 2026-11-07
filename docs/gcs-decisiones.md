@@ -23,11 +23,20 @@ del Anexo A v2 del certamen.
 | Telecomandos | Botones para los fijos más una línea de texto; eco en la telemetría y verificación por el efecto; confirmación para lo irreversible | El eco queda en el CSV como prueba para el jurado |
 | Simulador | Dentro de la app, con el perfil del Prometeo (673 m, eyección a los 12 s, 15 m/s, v₂ como parámetro entre 2.5 y 4.3 m/s); arma paquetes y los pasa por el decodificador | El decodificador y los contadores trabajan desde el primer día |
 | Licencia | MIT (confirmada el 2026-11-07) | Que otro equipo pueda reutilizarlo |
+| Resolución de diseño | Mínimo de 1366×768 píxeles **lógicos** (después de la escala de Windows), sin elegir todavía la notebook (#4) | Entra en cualquier notebook a su escala de fábrica; bajar la escala para ganar lugar achica la letra real y va contra G12 |
+| Ventana | Pantalla completa por defecto; F11 la pasa a ventana. Una sola pantalla | Unos 80 px más de alto a 1366×768; en el campo puede no haber segunda pantalla |
+| Pantallas grandes | Sin scroll y con letra fija en 14 pt: lo que sobra lo toman los gráficos. Por debajo del mínimo, aviso y se sigue. Sin zoom de letra para la PDR | Un scroll esconde datos igual que una pestaña (G13) |
+| Capturas de la diap. 77 | A 1366×768 lógicos con el doble de píxeles (2732×1536) | El jurado ve lo que vuela, nítido en una diapositiva 16:9 |
 
 ## Abierto
 
 - **Pantalla:** se decide con un prototipo de UI. Fijo por el anexo: sin pestañas
   (G13), letra de 14 pt o más, trazos y ejes en negrita, fondo claro (G12).
-- **Notebook del lanzamiento:** resolución y 2 h de batería (G9).
+- **Notebook del lanzamiento:** 2 h de batería (G9) y 1366×768 lógicos o más a
+  su escala de fábrica.
+- **Disposición amplia** (vistas extra con 1920×1080 o más): después de la PDR,
+  si aparece algo que valga la pena mostrar sólo en pantalla grande.
+- **Zoom de letra** (Ctrl+ y Ctrl−, con piso en 14 pt): se reabre si en un
+  ensayo a pleno sol los 14 pt no alcanzan.
 - **Campos de telemetría, formato de comandos y el campo de eco:** los define el equipo.
 - **Envoltorio del puente** y si las dos Heltec comparten firmware.
