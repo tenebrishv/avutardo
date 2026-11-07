@@ -22,7 +22,7 @@ del Anexo A v2 del certamen.
 | CSV | Encabezado `campo [unidad]`, nombre con la fecha y hora UTC del arranque, hora UTC de recepción en cada fila, punto decimal | G3, G6; el log crudo permite rehacer el CSV |
 | Telecomandos | Botones para los fijos más una línea de texto; eco en la telemetría y verificación por el efecto; confirmación para lo irreversible | El eco queda en el CSV como prueba para el jurado |
 | Simulador | Dentro de la app, con el perfil del Prometeo (673 m, eyección a los 12 s, 15 m/s, v₂ como parámetro entre 2.5 y 4.3 m/s); arma paquetes y los pasa por el decodificador | El decodificador y los contadores trabajan desde el primer día |
-| Licencia | MIT (propuesta, a confirmar con el tutor) | Que otro equipo pueda reutilizarlo |
+| Licencia | MIT (confirmada el 2026-11-07) | Que otro equipo pueda reutilizarlo |
 
 ## Abierto
 
