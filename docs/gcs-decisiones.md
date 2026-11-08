@@ -20,18 +20,24 @@ del Anexo A v2 del certamen.
 | Heltec de tierra | Puente transparente que agrega el RSSI y el SNR | Toda la lógica en la notebook; un cambio de formato no reflashea la Heltec |
 | Registro | CSV por paquete, con escritura forzada, en el disco y en el pendrive de etiqueta `AVUTARDO`, más log crudo. Sin pendrive, aviso en rojo y se sigue | G2 se cumple durante todo el vuelo, no sólo al final |
 | CSV | Encabezado `campo [unidad]`, nombre con la fecha y hora UTC del arranque, hora UTC de recepción en cada fila, punto decimal | G3, G6; el log crudo permite rehacer el CSV |
-| Telecomandos | Botones para los fijos más una línea de texto; eco en la telemetría y verificación por el efecto; confirmación para lo irreversible | El eco queda en el CSV como prueba para el jurado |
+| Telecomandos | Botones para los fijos más una línea de texto; eco en la telemetría y verificación por el efecto; confirmación para los comandos que hacen daño mandados por error en vuelo (comandos con confirmación) | El eco queda en el CSV como prueba para el jurado |
 | Simulador | Dentro de la app, con el perfil del Prometeo (673 m, eyección a los 12 s, 15 m/s, v₂ como parámetro entre 2.5 y 4.3 m/s); arma paquetes y los pasa por el decodificador | El decodificador y los contadores trabajan desde el primer día |
 | Licencia | MIT (confirmada el 2026-11-07) | Que otro equipo pueda reutilizarlo |
 | Resolución de diseño | Mínimo de 1366×768 píxeles **lógicos** (después de la escala de Windows), sin elegir todavía la notebook (#4) | Entra en cualquier notebook a su escala de fábrica; bajar la escala para ganar lugar achica la letra real y va contra G12 |
 | Ventana | Pantalla completa por defecto; F11 la pasa a ventana. Una sola pantalla | Unos 80 px más de alto a 1366×768; en el campo puede no haber segunda pantalla |
 | Pantallas grandes | Sin scroll y con letra fija en 14 pt: lo que sobra lo toman los gráficos. Por debajo del mínimo, aviso y se sigue. Sin zoom de letra para la PDR | Un scroll esconde datos igual que una pestaña (G13) |
 | Capturas de la diap. 77 | A 1366×768 lógicos con el doble de píxeles (2732×1536) | El jurado ve lo que vuela, nítido en una diapositiva 16:9 |
+| Pantalla | Variante G2 del prototipo (#7): Vuelo y GPS alta a la izquierda, Energía en dos celdas, telecomandos y Recorrido en una columna derecha de 230 px; barra de fases con los cinco estados de STANDBY a LANDED y pie de estado | Sin pestañas (G13), 14 pt y fondo claro (G12), con 20 px de holgura a 1366 de ancho |
+| Gráficos | Sin título ni leyenda; x, y, z en una línea de valores del color de su curva, que hace de leyenda; la unidad en el título de la tarjeta. Ventanas de 30, 60 y 120 s y Misión, arranca en 120 s; zoom sólo en Misión | Ganan alto los gráficos sin repetir la unidad |
+| Recorrido | Mapa sin fondo, en metros desde el lanzamiento; en LANDED pasa una vez al QR con el enlace a Google Maps, con un botón Mapa/QR | Sin sitio definido no hay fondo que precargar; el QR acelera la recuperación |
+| Velocidad vertical | Calculada en la GCS; recuadro verde dentro de la banda de la fase (C3, C4), rojo fuera y ámbar 5 s tras un cambio de estado | La banda va en el tooltip |
+| Umbrales de la GUI | Fijos en el código: 3 s sin paquetes para mostrar el enlace cortado y 5 s de transición | No hay nada que configurar en el campo |
 
 ## Abierto
 
-- **Pantalla:** se decide con un prototipo de UI. Fijo por el anexo: sin pestañas
-  (G13), letra de 14 pt o más, trazos y ejes en negrita, fondo claro (G12).
+- **Fondo del mapa precargado** del campo de lanzamiento: después de la PDR,
+  cuando esté definido el sitio.
+- **Nombre legible y decimales por campo** en `telemetria.toml`: pregunta al equipo.
 - **Notebook del lanzamiento:** 2 h de batería (G9) y 1366×768 lógicos o más a
   su escala de fábrica.
 - **Disposición amplia** (vistas extra con 1920×1080 o más): después de la PDR,
