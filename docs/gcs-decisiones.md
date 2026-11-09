@@ -11,6 +11,9 @@ del Anexo A v2 del certamen.
 | Plataforma | Python + PySide6 + pyqtgraph. Respaldo: web local con FastAPI | Lo usaron MetalHawk, Vortex y SEDS ITBA |
 | Repo | Uno solo para todo el código del CanSat | El formato de telemetría es compartido y vive en un solo lugar |
 | Formato | `protocolo/telemetria.toml` como única fuente; la GCS lo lee al arrancar y un script genera el `telemetria.h` de la Pico | Un cambio de campo se hace en un archivo, sin tocar código |
+| Paquete (versión 1, #10) | 61 B binarios, big-endian: cabecera primaria CCSDS 133.0-B-2 (APID 106, contador de 14 bits = F1), 1 B de versión del formato, 52 B de campos enteros con divisor y CRC-16/CCITT-FALSE. Un solo paquete a 1 Hz; sin dato = centinela del tipo; campos nuevos al final y sube la versión | Entra a SF9 con margen para un telecomando en el mismo segundo; el APID separa nuestros paquetes de los de otros equipos (X2) |
+| Clasificación de cada línea del puente | En orden: forma inválida → descartado; largo ≠ 61 → ajeno; CRC inválido → descartado; otro APID o tipo TC → ajeno; versión desconocida → descartado; si no, recibido. Todo va al log crudo | Recibidos, perdidos y descartados en pantalla (G14, F1); lo ajeno no ensucia los conteos |
+| Perdidos | `(actual − anterior − 1) mod 16384`; un salto hacia adelante de más de 8 000 es un contador reiniciado, sin perdidos; contador repetido con datos distintos se acepta y se marca, idéntico se ignora | La vuelta de 16 383 a 0 no cuenta como pérdida |
 | Módulos | Fuente → Decodificador → Estado de misión → GUI y Registro | Sólo el decodificador conoce el formato; el estado se testea sin Qt |
 | Lectura serie | `QSerialPort` con `readyRead`, sin hilos | Sin hilos no hay carreras; el simulador emite la misma señal |
 | Entorno | `uv` con `pyproject.toml` y `uv.lock` | La notebook del lanzamiento se reinstala con un comando, idéntica a la probada |
@@ -37,12 +40,15 @@ del Anexo A v2 del certamen.
 
 - **Fondo del mapa precargado** del campo de lanzamiento: después de la PDR,
   cuando esté definido el sitio.
-- **Nombre legible y decimales por campo** en `telemetria.toml`: pregunta al equipo.
+- **Nombre legible por campo** en `telemetria.toml`: pregunta al equipo. (Los
+  decimales del CSV ya salen del `divisor`.)
 - **Notebook del lanzamiento:** 2 h de batería (G9) y 1366×768 lógicos o más a
   su escala de fábrica.
 - **Disposición amplia** (vistas extra con 1920×1080 o más): después de la PDR,
   si aparece algo que valga la pena mostrar sólo en pantalla grande.
 - **Zoom de letra** (Ctrl+ y Ctrl−, con piso en 14 pt): se reabre si en un
   ensayo a pleno sol los 14 pt no alcanzan.
-- **Campos de telemetría, formato de comandos y el campo de eco:** los define el equipo.
-- **Envoltorio del puente** y si las dos Heltec comparten firmware.
+- **Formato de los telecomandos y contenido del `eco_comando`:** #11. El campo
+  ya tiene su lugar en el paquete (`reservado`).
+- **Si las dos Heltec comparten firmware.** La línea del puente ya está fijada:
+  `<hex>,<rssi>,<snr>`.

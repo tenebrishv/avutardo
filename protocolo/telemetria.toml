@@ -1,173 +1,218 @@
 # ============================================================================
-#  PROVISORIO — formato de ejemplo para el simulador de la estación terrena.
+#  Formato de telemetría del CanSat Avutardo — versión 1 (issue #10).
 #
-#  El equipo todavía no definió el formato de telemetría. Estos campos salen
-#  de lo que pide el Anexo A v2 (X5, SN3, SN8, G3, G8, F1, F2, F3) para que el
-#  prototipo funcione; no son una decisión. Cuando el equipo traiga el formato
-#  real, se reemplaza este archivo y la estación terrena no cambia de código.
+#  Única fuente del formato: la FSW de la Pico arma el paquete con él y la
+#  estación terrena lo decodifica con él. Un campo se cambia acá, nunca en el
+#  código.
+#
+#  Paquete de 61 B, big-endian, campo por campo:
+#
+#    bytes  0–5   cabecera primaria CCSDS 133.0-B-2, sin cabecera secundaria,
+#                 flags de secuencia 11, APID de [cabecera] y tipo TM; su
+#                 contador de 14 bits es el contador de secuencia (F1)
+#    byte   6     versión del formato (`version`, abajo)
+#    bytes  7–58  los campos, en el orden de este archivo
+#    bytes 59–60  CRC-16/CCITT-FALSE sobre los bytes 0–58
+#
+#  Reglas:
+#  - Un solo tipo de paquete, a 1 Hz. Cuando el GPS se lee cada 10 s, sus
+#    campos repiten el último valor.
+#  - Sin dato = centinela: el mínimo del tipo si es con signo, el máximo si es
+#    sin signo (255, 65 535…). No lleva clave: sale del tipo.
+#  - Los campos nuevos van siempre AL FINAL y la versión sube en 1.
+#  - Los parámetros de radio (SF, ancho de banda, preámbulo) no van acá.
 # ============================================================================
 
-version = "0.1-provisorio"
-provisorio = true
+version = 1
 
-# Cómo viaja un paquete (PROVISORIO, también lo define el equipo):
-# una línea de texto ASCII, campos en el orden de este archivo, separados por
-# `separador` y terminada en `fin_de_linea`. Números con punto decimal.
-[paquete]
-codificacion = "ascii"
-separador = ","
-fin_de_linea = "\n"
+[enlace]
+codificacion = "binario"
+crc = "CRC-16/CCITT-FALSE"
+# Lo que el puente (la Heltec de tierra) le pasa a la notebook por cada paquete:
+# el paquete en hexadecimal, el RSSI [dBm] y el SNR [dB].
+linea_puente = "<hex>,<rssi>,<snr>\n"
 
-# Cada [[campo]] es un elemento de la lista. El orden en el archivo es el
-# orden en el paquete. `tipo`: int | float | str. `unidad`: SI, o vacía si el
-# campo no tiene unidad. `requisito`: el código del Anexo A v2 que lo pide.
-# `propuesta = true` marca un campo que no pide el anexo y que hay que llevar
-# a la definición del formato.
+[cabecera]
+# El resto de la cabecera lo fija la norma CCSDS y vive en el decodificador.
+# El mismo APID para la telemetría y los telecomandos.
+apid = 106
+
+# Cada [[campo]] lleva:
+#   nombre       identificador del campo (columna del CSV)
+#   tipo         uint8 | int16 | uint16 | int32 | uint32
+#   divisor      valor físico = entero / divisor (por defecto 1); de él salen
+#                los decimales del CSV
+#   unidad       SI, o vacía si el campo no tiene unidad
+#   requisito    código del Anexo A v2 que lo pide
+#   descripcion
+# y, opcionales:
+#   valores      nombres de los códigos 0, 1, 2… (sólo uint8); un código
+#                desconocido se muestra como ?7
+#   mostrar      "hora_utc": segundos Unix que se muestran hh:mm:ss y van al
+#                CSV en ISO 8601 (2026-11-07T13:48:05Z)
+#   reservado    true: viaja en el paquete, pero no se muestra ni va al CSV
 
 [[campo]]
-nombre = "contador"
-tipo = "int"
+nombre = "estado_fsw"
+tipo = "uint8"
 unidad = ""
-requisito = "F1"
-descripcion = "Paquetes transmitidos; persiste a través de reinicios"
+requisito = "G8"
+valores = ["BOOT", "STANDBY", "ASCENT", "DESCENT 1", "DESCENT 2", "LANDED"]
+descripcion = "Estado del software de vuelo"
+
+[[campo]]
+nombre = "hora"
+tipo = "uint32"
+unidad = "s"
+requisito = "F3"
+mostrar = "hora_utc"
+descripcion = "Hora UTC del CanSat (DS3231), segundos Unix"
 
 [[campo]]
 nombre = "tiempo_mision"
-tipo = "float"
+tipo = "uint16"
 unidad = "s"
 requisito = "G3 F2"
 descripcion = "Tiempo de misión; persiste a través de reinicios"
 
 [[campo]]
-nombre = "hora"
-tipo = "str"
-unidad = ""
-requisito = "F3"
-descripcion = "Hora UTC del CanSat (DS3231), hh:mm:ss"
-
-[[campo]]
-nombre = "estado_fsw"
-tipo = "str"
-unidad = ""
-requisito = "G8"
-descripcion = "Estado del software de vuelo"
-
-[[campo]]
 nombre = "altitud"
-tipo = "float"
+tipo = "int16"
+divisor = 10
 unidad = "m"
 requisito = "X5 SN1"
 descripcion = "Altitud barométrica respecto de la rampa"
 
 [[campo]]
 nombre = "presion"
-tipo = "float"
+tipo = "uint32"
 unidad = "Pa"
 requisito = "X5"
 descripcion = "Presión atmosférica (BME280)"
 
 [[campo]]
 nombre = "temperatura"
-tipo = "float"
+tipo = "int16"
+divisor = 100
 unidad = "°C"
 requisito = "X5 SN2"
 descripcion = "Temperatura interna (BME280)"
 
 [[campo]]
 nombre = "tension"
-tipo = "float"
+tipo = "uint16"
+divisor = 1000
 unidad = "V"
 requisito = "SN3 G7"
 descripcion = "Tensión del pack (INA226)"
 
 [[campo]]
 nombre = "corriente"
-tipo = "float"
+tipo = "int16"
+divisor = 1000
 unidad = "A"
 requisito = "SN8 G7"
 descripcion = "Corriente del pack (INA226)"
 
 [[campo]]
+nombre = "panel"
+tipo = "uint16"
+divisor = 1000
+unidad = "V"
+requisito = "X6"
+descripcion = "Tensión del panel solar"
+
+[[campo]]
 nombre = "acel_x"
-tipo = "float"
+tipo = "int16"
+divisor = 100
 unidad = "m/s²"
 requisito = "X5 SN5"
 descripcion = "Aceleración, eje x (LSM6DSV32X)"
 
 [[campo]]
 nombre = "acel_y"
-tipo = "float"
+tipo = "int16"
+divisor = 100
 unidad = "m/s²"
 requisito = "X5 SN5"
 descripcion = "Aceleración, eje y (LSM6DSV32X)"
 
 [[campo]]
 nombre = "acel_z"
-tipo = "float"
+tipo = "int16"
+divisor = 100
 unidad = "m/s²"
 requisito = "X5 SN5"
 descripcion = "Aceleración, eje z (LSM6DSV32X)"
 
 [[campo]]
 nombre = "rot_x"
-tipo = "float"
+tipo = "int16"
+divisor = 10
 unidad = "°/s"
 requisito = "X5 SN5"
-descripcion = "Velocidad de rotación, eje x (LSM6DSV32X)"
+descripcion = "Velocidad de rotación, eje x (LSM6DSV32X, ±2000 °/s)"
 
 [[campo]]
 nombre = "rot_y"
-tipo = "float"
+tipo = "int16"
+divisor = 10
 unidad = "°/s"
 requisito = "X5 SN5"
-descripcion = "Velocidad de rotación, eje y (LSM6DSV32X)"
+descripcion = "Velocidad de rotación, eje y (LSM6DSV32X, ±2000 °/s)"
 
 [[campo]]
 nombre = "rot_z"
-tipo = "float"
+tipo = "int16"
+divisor = 10
 unidad = "°/s"
 requisito = "X5 SN5"
-descripcion = "Velocidad de rotación, eje z (LSM6DSV32X)"
+descripcion = "Velocidad de rotación, eje z (LSM6DSV32X, ±2000 °/s)"
 
 [[campo]]
 nombre = "gps_hora"
-tipo = "str"
-unidad = ""
+tipo = "uint32"
+unidad = "s"
 requisito = "SN4"
-descripcion = "Hora UTC del GPS de la Heltec, hh:mm:ss"
+mostrar = "hora_utc"
+descripcion = "Hora UTC del GPS, segundos Unix"
 
 [[campo]]
 nombre = "gps_latitud"
-tipo = "float"
+tipo = "int32"
+divisor = 10_000_000
 unidad = "°"
 requisito = "X5 SN4"
 descripcion = "Latitud, grados decimales (norte positivo)"
 
 [[campo]]
 nombre = "gps_longitud"
-tipo = "float"
+tipo = "int32"
+divisor = 10_000_000
 unidad = "°"
 requisito = "X5 SN4"
 descripcion = "Longitud, grados decimales (este positivo)"
 
 [[campo]]
 nombre = "gps_altitud"
-tipo = "float"
+tipo = "int32"
+divisor = 10
 unidad = "m"
 requisito = "X5 SN4"
 descripcion = "Altitud GPS sobre el nivel del mar"
 
 [[campo]]
 nombre = "gps_satelites"
-tipo = "int"
+tipo = "uint8"
 unidad = ""
 requisito = "X5 SN4"
-descripcion = "Satélites en uso"
+descripcion = "Satélites en uso; 0 es un dato real (sin fix)"
 
 [[campo]]
 nombre = "eco_comando"
-tipo = "str"
+tipo = "uint16"
 unidad = ""
 requisito = "G15"
-propuesta = true
+reservado = true
 descripcion = "Último telecomando recibido y ejecutado (verificación en tierra)"
