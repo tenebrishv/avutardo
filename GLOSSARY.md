@@ -80,3 +80,10 @@ DESCENT 2, LANDED y POWER OFF. En el paquete viajan como un número del 0 al 5
 en ese orden; POWER OFF no tiene código porque no transmite, y 255 es "sin
 dato".
 _Evitar_: modo, fase de vuelo, estado del CanSat
+
+## Simulación
+
+**Vuelo de demostración**:
+Un vuelo simulado fijo, idéntico en cada corrida, con instantes con nombre
+(`standby`, `descenso`, `aterrizado`) de los que salen las capturas de la PDR.
+_Evitar_: escenario, demo, vuelo de prueba
