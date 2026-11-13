@@ -12,7 +12,7 @@ software, the radio-link and camera firmware, the ground station and the
 telemetry format that ties them together.
 
 > **Status:** the project is at the PDR (Preliminary Design Review) stage. The
-> repository has its structure, CI and a provisional telemetry format; the code
+> repository has its structure, CI and version 1 of the telemetry format; the code
 > for each part is being written from now on. The [Status](#status) table shows
 > what exists and what is missing in each folder.
 
@@ -73,7 +73,7 @@ generate the Pico's C header from it.
 | Folder | What it is | Status |
 |---|---|---|
 | [`gcs/`](gcs/) | Ground station (Python, PySide6 and pyqtgraph) | **Skeleton:** structure, dependencies and CI. It does nothing useful yet. |
-| [`protocolo/`](protocolo/) | Telemetry format, shared by everything else | **Provisional:** sample fields for the simulator. The team defines the real format. |
+| [`protocolo/`](protocolo/) | Telemetry format, shared by everything else | **Version 1:** 61-byte binary packet with a CCSDS header and CRC-16, 21 fields. Telecommands are still missing (#11). |
 | [`firmware/pico/`](firmware/pico/) | Flight software for the Raspberry Pi Pico 2 | No code yet |
 | [`firmware/heltec/`](firmware/heltec/) | LoRa link, on board and on the ground | No code yet |
 | [`firmware/camaras/`](firmware/camaras/) | ESP32-S3-CAM N16R8 cameras with OV5640 | No code yet |
