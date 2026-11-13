@@ -41,6 +41,20 @@ una captura al doble de píxeles en `prototipos/capturas/` (como pide #4, Q6).
 Para ver los avisos: F6 saca y pone el pendrive, F7 corta y repone el enlace.
 F8 adelanta 30 s de vuelo (para llegar al aterrizaje y ver el QR de G).
 
+Para probar la simulación:
+
+    F5        reinicia el vuelo desde STANDBY
+    Espacio   pausa y reanuda
+    F9        velocidad ×1 → ×5 → ×10
+    1 a 5     salta a STANDBY, ASCENT, DESCENT 1, DESCENT 2 o LANDED
+    F1        ráfaga de 5 paquetes perdidos
+    F2        el próximo paquete llega con el CRC roto (descartado y perdido)
+    F3        GPS sin fix (0 satélites, posición sin dato) / con fix
+    F4        batería baja (1.5 V menos) / normal
+    F10       reinicio de la FSW: 3 s sin transmitir, un paquete en BOOT y
+              sigue en su estado; el contador y el tiempo de misión siguen
+              (F1, F2, F5)
+
 El QR de G necesita `segno`, que no es dependencia de la GCS: correr con
 `uv run --with segno python prototipos/pantalla.py G`.
 """
@@ -101,6 +115,8 @@ def fmt(nombre: str, valor) -> str:
     """Punto decimal y espacio fino de miles, como la norma del equipo."""
     if isinstance(valor, str):
         return valor
+    if isinstance(valor, float) and math.isnan(valor):
+        return "—"  # sin dato
     if isinstance(valor, int):
         return f"{valor:,}".replace(",", " ")
     dec = 6 if nombre.startswith("gps_l") else 2 if abs(valor) < 100 else 1
@@ -149,6 +165,14 @@ class Simulador:
         self.snr = 9.0
         self.ultimo: dict = {}
         self.registro: deque[str] = deque(maxlen=200)
+        # Fallas que se disparan con el teclado (ver el encabezado).
+        self.descartados = 0
+        self.rafaga = 0  # paquetes que quedan por perder
+        self.crc_roto = 0  # paquetes que quedan por llegar con el CRC roto
+        self.sin_fix = False
+        self.bateria_baja = False
+        self.reinicio = 0  # segundos que le faltan a la FSW para volver
+        self.boot = False  # el próximo paquete sale en BOOT
         # Arranca con 40 s en la rampa y el lanzamiento a los 45 s, para que los
         # gráficos no estén vacíos al abrir.
         for _ in range(40):
@@ -170,10 +194,20 @@ class Simulador:
         self.reloj += 1
         if self.cortado:
             return
+        if self.reinicio > 0:
+            # La FSW está reiniciando: no transmite, pero el tiempo de misión
+            # sigue (F2) y el contador no salta (F1), así que no hay perdidos.
+            self.reinicio -= 1
+            self.t += 1
+            self.boot = self.reinicio == 0
+            return
         self.t += 1
         self.contador += 1
         tv = self.t - 45
         alt, estado = self._perfil(tv)
+        if self.boot:  # el primer paquete después del reinicio
+            estado = "BOOT"
+            self.boot = False
         if estado not in ("STANDBY", "LANDED"):
             self.deriva += 1
         if self.ultimo and estado != self.ultimo["estado_fsw"]:
@@ -191,7 +225,7 @@ class Simulador:
             "altitud": alt - self.offset_alt,
             "presion": 101325 * (1 - 2.25577e-5 * alt) ** 5.25588 + r(0, 3),
             "temperatura": 18.0 - 0.0065 * alt + r(0, 0.1),
-            "tension": 7.9 - 0.002 * self.t + r(0, 0.01),
+            "tension": 7.9 - 0.002 * self.t - (1.5 if self.bateria_baja else 0) + r(0, 0.01),
             "corriente": (0.42 if estado in ("ASCENT", "DESCENT 1", "DESCENT 2") else 0.18)
             + r(0, 0.01),
             "panel": 5.5 + r(0, 0.05),  # de juguete, como el resto
@@ -208,6 +242,16 @@ class Simulador:
             "gps_satelites": 9,
             "eco_comando": self.eco,
         }
+        if self.sin_fix:  # 0 satélites es un dato real; la posición, sin dato
+            nan = float("nan")
+            p.update(gps_latitud=nan, gps_longitud=nan, gps_altitud=nan, gps_satelites=0)
+        if self.rafaga > 0:
+            self.rafaga -= 1
+            return
+        if self.crc_roto > 0:  # llega, pero no se decodifica: descartado y hueco
+            self.crc_roto -= 1
+            self.descartados += 1
+            return
         if self.enlace_caido or (random.random() < 0.04 and self.contador > 3):
             return  # paquete perdido en el aire
         if self.ultimo_contador is not None:
@@ -232,6 +276,13 @@ class Simulador:
         self.rssi = -68 - alt / 25 + r(0, 1.5)
         self.snr = 10 - alt / 120 + r(0, 0.5)
         self.registro.append(",".join(fmt(c["nombre"], p[c["nombre"]]) for c in CAMPOS))
+
+    def saltar(self, estado: str) -> None:
+        """Corre el vuelo hasta que el perfil llegue a `estado` (sólo hacia adelante)."""
+        for _ in range(1000):
+            if self.cortado or self._perfil(self.t - 45)[1] == estado:
+                return
+            self.paso()
 
     def telecomando(self, nombre: str, argumento: str = "") -> None:
         if nombre == "altitud cero":
@@ -354,7 +405,7 @@ def refrescar_curvas(sim: Simulador, curvas: dict, inicio: float | None = None) 
         inicio = t[-1] - HISTORIA
     i = bisect.bisect_left(t, inicio)
     for nombre, curva in curvas.items():
-        curva.setData(t[i:], sim.historia[nombre][i:])
+        curva.setData(t[i:], sim.historia[nombre][i:], connect="finite")
 
 
 def indicador(titulo: str) -> tuple[QFrame, QLabel]:
@@ -525,7 +576,8 @@ class VarianteB(QWidget):
         self.ind["perdidos"].setStyleSheet("color: #b03a2e" if s.perdidos else "")
         self.ind["temperatura"].setText(fmt("temperatura", p["temperatura"]))
         self.ind["gps"].setText(
-            f"{p['gps_latitud']:.5f}  {p['gps_longitud']:.5f}  ({p['gps_satelites']} sat.)"
+            f"{fmt('gps_latitud', p['gps_latitud'])}  {fmt('gps_longitud', p['gps_longitud'])}"
+            f"  ({p['gps_satelites']} sat.)"
         )
         refrescar_curvas(s, self.c_alt)
         refrescar_curvas(s, self.curvas)
@@ -594,7 +646,15 @@ class VarianteC(QWidget):
         self.tarjetas = [
             Tarjeta(
                 "Misión",
-                ["estado_fsw", "contador", "tiempo_mision", "hora", "recibidos", "perdidos"],
+                [
+                    "estado_fsw",
+                    "contador",
+                    "tiempo_mision",
+                    "hora",
+                    "recibidos",
+                    "perdidos",
+                    "descartados",
+                ],
             ),
             Tarjeta(
                 "Vuelo",
@@ -647,7 +707,11 @@ class VarianteC(QWidget):
         g.setRowStretch(1, 1)
 
     def actualizar(self) -> None:
-        extra = {"recibidos": self.sim.recibidos, "perdidos": self.sim.perdidos}
+        extra = {
+            "recibidos": self.sim.recibidos,
+            "perdidos": self.sim.perdidos,
+            "descartados": self.sim.descartados,
+        }
         for t in self.tarjetas:
             t.actualizar(self.sim, extra)
         self.comandos.actualizar()
@@ -661,6 +725,13 @@ ETIQUETA_GCS = {
     **{f"rot_{e}": f"{e} [°/s]" for e in "xyz"},
 }
 FASES = ["STANDBY", "ASCENT", "DESCENT 1", "DESCENT 2", "LANDED"]
+
+
+def indice_fase(estado: str) -> int:
+    """BOOT (tras un reinicio) no es una fase de la barra: no se marca ninguna."""
+    return FASES.index(estado) if estado in FASES else -1
+
+
 BANDA = {"DESCENT 1": (15, 3, "C3"), "DESCENT 2": (5, 3, "C4")}  # bajada [m/s]
 NIVEL = {
     "ok": "background: #e8f6ee; color: #145a32; border: 2px solid #1e8449;",
@@ -820,6 +891,7 @@ class Franja(QWidget):
         ("hora", "Hora UTC"),
         ("recibidos", "Recibidos"),
         ("perdidos", "Perdidos"),
+        ("descartados", "Descartados"),
         ("eco_comando", "Eco del comando"),
     ]
 
@@ -843,6 +915,7 @@ class Franja(QWidget):
         for clave, valor in self.ind.items():
             valor.setText(fmt(clave, datos[clave]) if datos[clave] != "" else "—")
         self.ind["perdidos"].setStyleSheet("color: #b03a2e" if datos["perdidos"] else "")
+        self.ind["descartados"].setStyleSheet("color: #b03a2e" if datos["descartados"] else "")
 
 
 def chip(texto: str, nivel: str) -> QLabel:
@@ -911,6 +984,7 @@ class Hibrido(QWidget):
             **s.ultimo,
             "recibidos": s.recibidos,
             "perdidos": s.perdidos,
+            "descartados": s.descartados,
             "vel_vertical": s.vel_vertical,
         }
         self.franja.actualizar(datos)
@@ -1016,7 +1090,7 @@ class VarianteE(Hibrido):
 
     def actualizar(self) -> None:
         super().actualizar()
-        actual = FASES.index(self.sim.ultimo["estado_fsw"])
+        actual = indice_fase(self.sim.ultimo["estado_fsw"])
         for i, lb in enumerate(self.fases):
             if i == actual:
                 estilo = "background: #1f4e9c; color: white; border: 2px solid #1f4e9c;"
@@ -1217,7 +1291,11 @@ class TarjetaRecorrido(QFrame):
         if sim.t_lanzamiento is None:
             return
         i = bisect.bisect_left(sim.tiempos, sim.t_lanzamiento)
-        lats, lons = sim.historia["gps_latitud"][i:], sim.historia["gps_longitud"][i:]
+        pares = zip(sim.historia["gps_latitud"][i:], sim.historia["gps_longitud"][i:], strict=True)
+        con_fix = [(la, lo) for la, lo in pares if not math.isnan(la)]
+        if not con_fix:
+            return
+        lats, lons = [la for la, _ in con_fix], [lo for _, lo in con_fix]
         lat0, lon0 = lats[0], lons[0]
         k = 111_320.0
         xs = [(lo - lon0) * k * math.cos(math.radians(lat0)) for lo in lons]
@@ -1226,7 +1304,7 @@ class TarjetaRecorrido(QFrame):
         self.base.setData([0], [0])
         self.punto.setData(xs[-1:], ys[-1:])
         if datos["estado_fsw"] == "LANDED":
-            lat, lon = datos["gps_latitud"], datos["gps_longitud"]
+            lat, lon = lats[-1], lons[-1]  # la última posición con fix
             texto = f"https://maps.google.com/?q={lat:.6f},{lon:.6f}"
             if texto != self.ultimo_qr:
                 self.ultimo_qr = texto
@@ -1315,7 +1393,7 @@ class VarianteG(Hibrido):
     def actualizar(self) -> None:
         super().actualizar()
         s = self.sim
-        actual = FASES.index(s.ultimo["estado_fsw"])
+        actual = indice_fase(s.ultimo["estado_fsw"])
         for i, lb in enumerate(self.fases):
             if i == actual:
                 estilo = "background: #1f4e9c; color: white; border: 2px solid #1f4e9c;"
@@ -1459,6 +1537,82 @@ class Ventana(QMainWindow):
         QShortcut(QKeySequence(Qt.Key.Key_Left), self, lambda: self.flecha(-1))
         QShortcut(QKeySequence(Qt.Key.Key_Right), self, lambda: self.flecha(1))
 
+        # Controles para probar la simulación (ver el encabezado).
+        self.velocidad = 1
+        self.pausado = False
+        teclas = {
+            Qt.Key.Key_F5: self.reiniciar,
+            Qt.Key.Key_Space: self.pausar,
+            Qt.Key.Key_F9: self.acelerar,
+            Qt.Key.Key_F1: lambda: self.falla("rafaga"),
+            Qt.Key.Key_F2: lambda: self.falla("crc"),
+            Qt.Key.Key_F3: lambda: self.falla("gps"),
+            Qt.Key.Key_F4: lambda: self.falla("bateria"),
+            Qt.Key.Key_F10: lambda: self.falla("reinicio"),
+        }
+        for i, fase in enumerate(FASES):
+            teclas[Qt.Key(Qt.Key.Key_1.value + i)] = lambda f=fase: self.saltar(f)
+        for tecla, accion in teclas.items():
+            QShortcut(QKeySequence(tecla), self, accion)
+        self.actualizar_titulo()
+
+    def actualizar_titulo(self) -> None:
+        nota = "Datos simulados" + ("; formato provisorio" if FORMATO.get("provisorio") else "")
+        marcha = "EN PAUSA" if self.pausado else f"×{self.velocidad}"
+        self.setWindowTitle(f"Avutardo GCS — PROTOTIPO — {nota} — {marcha}")
+
+    def avisar(self, texto: str) -> None:
+        self.statusBar().showMessage(texto, 3000)
+
+    def reiniciar(self) -> None:
+        """F5: un vuelo nuevo desde STANDBY, en la misma variante."""
+        self.sim = Simulador()
+        self.poner(self.actual)
+        self.avisar("Vuelo reiniciado")
+
+    def pausar(self) -> None:
+        if isinstance(QApplication.focusWidget(), QLineEdit):
+            return
+        self.pausado = not self.pausado
+        self.actualizar_titulo()
+        self.avisar("En pausa" if self.pausado else "En marcha")
+
+    def acelerar(self) -> None:
+        self.velocidad = {1: 5, 5: 10, 10: 1}[self.velocidad]
+        self.actualizar_titulo()
+        self.avisar(f"Velocidad ×{self.velocidad}")
+
+    def saltar(self, fase: str) -> None:
+        """1 a 5: hacia adelante corre el vuelo; hacia atrás, lo reinicia antes."""
+        if isinstance(QApplication.focusWidget(), QLineEdit):
+            return
+        actual = FASES.index(self.sim._perfil(self.sim.t - 45)[1])
+        if FASES.index(fase) < actual or self.sim.cortado:
+            self.sim = Simulador()
+            self.poner(self.actual)
+        self.sim.saltar(fase)
+        self.vista.actualizar()
+        self.avisar(f"Salto a {fase}")
+
+    def falla(self, que: str) -> None:
+        s = self.sim
+        if que == "rafaga":
+            s.rafaga = 5
+            texto = "Ráfaga: se pierden los próximos 5 paquetes"
+        elif que == "crc":
+            s.crc_roto = 1
+            texto = "El próximo paquete llega con el CRC roto"
+        elif que == "gps":
+            s.sin_fix = not s.sin_fix
+            texto = "GPS sin fix" if s.sin_fix else "GPS con fix"
+        elif que == "bateria":
+            s.bateria_baja = not s.bateria_baja
+            texto = "Batería baja" if s.bateria_baja else "Batería normal"
+        else:
+            s.reinicio = 3
+            texto = "Reinicio de la FSW: 3 s sin transmitir"
+        self.avisar(texto)
+
     def poner(self, clave: str) -> None:
         self.actual = clave
         self.vista = VARIANTES[clave](self.sim)
@@ -1492,7 +1646,10 @@ class Ventana(QMainWindow):
         self.vista.actualizar()
 
     def tick(self) -> None:
-        self.sim.paso()
+        if self.pausado:
+            return
+        for _ in range(self.velocidad):
+            self.sim.paso()
         self.vista.actualizar()
 
     def alternar_completa(self) -> None:
