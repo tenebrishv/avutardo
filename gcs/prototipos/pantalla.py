@@ -133,7 +133,8 @@ class Simulador:
         self.offset_alt = 0.0
         self.alt_max = 0.0
         # La misión entera: el modo "Histórico" la necesita (son ~10 min a 1 Hz).
-        self.historia: dict[str, list] = {c["nombre"]: [] for c in CAMPOS}
+        # El contador viene en la cabecera CCSDS (telemetria.toml v1), no en CAMPOS.
+        self.historia: dict[str, list] = {c["nombre"]: [] for c in CAMPOS} | {"contador": []}
         self.tiempos: list[float] = []
         # Lo que agrega la GCS, fuera del formato.
         self.reloj = 0  # segundos de la notebook, avanzan aunque no llegue nada
@@ -193,6 +194,7 @@ class Simulador:
             "tension": 7.9 - 0.002 * self.t + r(0, 0.01),
             "corriente": (0.42 if estado in ("ASCENT", "DESCENT 1", "DESCENT 2") else 0.18)
             + r(0, 0.01),
+            "panel": 5.5 + r(0, 0.05),  # de juguete, como el resto
             "acel_x": r(0, 0.3) + golpe * 0.3,
             "acel_y": r(0, 0.3),
             "acel_z": g + empuje + golpe + r(0, 0.3),
