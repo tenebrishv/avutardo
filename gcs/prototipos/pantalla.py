@@ -46,7 +46,7 @@ Para probar la simulación:
     F5        reinicia el vuelo desde STANDBY
     Espacio   pausa y reanuda
     F9        velocidad ×1 → ×5 → ×10
-    1 a 5     salta a STANDBY, ASCENT, DESCENT 1, DESCENT 2 o LANDED
+    1 a 5     salta a STANDBY, ASCENT, DESCENT_1, DESCENT_2 o LANDED
     F1        ráfaga de 5 paquetes perdidos
     F2        el próximo paquete llega con el CRC roto (descartado y perdido)
     F3        GPS sin fix (0 satélites, posición sin dato) / con fix
@@ -95,6 +95,7 @@ from PySide6.QtWidgets import (
 
 RAIZ = Path(__file__).resolve().parents[2]
 TOML = RAIZ / "protocolo" / "telemetria.toml"
+TOML_TC = RAIZ / "protocolo" / "telecomandos.toml"
 CAPTURAS = Path(__file__).resolve().parent / "capturas"
 
 PT = 14  # G12: letra de 14 pt o más, en toda la pantalla
@@ -109,6 +110,8 @@ with TOML.open("rb") as f:
     FORMATO = tomllib.load(f)
 CAMPOS = FORMATO["campo"]
 UNIDAD = {c["nombre"]: c["unidad"] for c in CAMPOS}
+with TOML_TC.open("rb") as f:
+    COMANDOS = {c["nombre"]: c for c in tomllib.load(f)["comando"]}
 
 
 def fmt(nombre: str, valor) -> str:
@@ -144,12 +147,17 @@ class Simulador:
         self.recibidos = 0
         self.perdidos = 0
         self.ultimo_contador: int | None = None
-        self.eco = ""
+        # Eco y par extra (ADR 0003): sin telecomandos todavía, en blanco.
+        self.eco_id = 0
+        self.eco_codigo = ""
+        self.resultado_comando = ""
+        self.extra_id = ""
+        self.extra_valor = 0
         self.cortado = False
         self.offset_alt = 0.0
         self.alt_max = 0.0
         # La misión entera: el modo "Histórico" la necesita (son ~10 min a 1 Hz).
-        # El contador viene en la cabecera CCSDS (telemetria.toml v1), no en CAMPOS.
+        # El contador viene en la cabecera CCSDS (telemetria.toml), no en CAMPOS.
         self.historia: dict[str, list] = {c["nombre"]: [] for c in CAMPOS} | {"contador": []}
         self.tiempos: list[float] = []
         # Lo que agrega la GCS, fuera del formato.
@@ -185,10 +193,10 @@ class Simulador:
             return 673 * math.sin(tv / 12 * math.pi / 2), "ASCENT"
         alt = 673 - 15 * (tv - 12)
         if alt > 0.8 * 673:
-            return alt, "DESCENT 1"
+            return alt, "DESCENT_1"
         t2 = 12 + (673 - 0.8 * 673) / 15
         alt = 0.8 * 673 - 3.5 * (tv - t2)
-        return (alt, "DESCENT 2") if alt > 0 else (0.0, "LANDED")
+        return (alt, "DESCENT_2") if alt > 0 else (0.0, "LANDED")
 
     def paso(self) -> None:
         self.reloj += 1
@@ -217,31 +225,55 @@ class Simulador:
         g = 9.81
         empuje = 60 if 0 <= tv < 2 else 0
         golpe = 80 if 12 <= tv < 13 else 0
+        en_vuelo = estado in ("ASCENT", "DESCENT_1", "DESCENT_2")
+        liberado = estado in ("DESCENT_2", "LANDED")
+        # Los 32 campos de la v2, en el orden del .toml. Los campos con `valores`
+        # (estado_fsw, modo…) y los códigos de telecomando van ya con su nombre:
+        # el prototipo no arma bytes. Fuera de energía y enlace, valores de juguete.
         p = {
-            "contador": self.contador,
-            "tiempo_mision": self.t,
-            "hora": datetime.now(UTC).strftime("%H:%M:%S"),
+            "contador": self.contador,  # cabecera CCSDS, no es un campo
+            # Operación
             "estado_fsw": estado,
-            "altitud": alt - self.offset_alt,
+            "modo": "FLIGHT",
+            "hora": datetime.now(UTC).strftime("%H:%M:%S"),
+            "tiempo_mision": self.t,
+            # Ambiental
             "presion": 101325 * (1 - 2.25577e-5 * alt) ** 5.25588 + r(0, 3),
+            "altitud": alt - self.offset_alt,
             "temperatura": 18.0 - 0.0065 * alt + r(0, 0.1),
-            "tension": 7.9 - 0.002 * self.t - (1.5 if self.bateria_baja else 0) + r(0, 0.01),
-            "corriente": (0.42 if estado in ("ASCENT", "DESCENT 1", "DESCENT 2") else 0.18)
-            + r(0, 0.01),
-            "panel": 5.5 + r(0, 0.05),  # de juguete, como el resto
+            "humedad": round(45 + r(0, 0.5)),
+            # Energía
+            "tension_bateria": 7.9 - 0.002 * self.t - 1.5 * self.bateria_baja + r(0, 0.01),
+            "corriente_bateria": (0.42 if en_vuelo else 0.18) + r(0, 0.01),
+            "tension_3v3": 3.30 + r(0, 0.005),
+            "corriente_3v3": (0.15 if en_vuelo else 0.09) + r(0, 0.003),
+            "tension_panel": 5.5 + r(0, 0.05),
+            "corriente_panel": 0.08 + r(0, 0.005),
+            # Navegación
+            "gps_latitud": -53.7860 + 0.00002 * self.deriva + r(0, 0.000005),
+            "gps_longitud": -67.7000 + 0.00003 * self.deriva + r(0, 0.000005),
+            "gps_altitud": 30 + alt + r(0, 2),
+            "gps_satelites": 9,
+            # Inercial
             "acel_x": r(0, 0.3) + golpe * 0.3,
             "acel_y": r(0, 0.3),
             "acel_z": g + empuje + golpe + r(0, 0.3),
             "rot_x": r(0, 3) + (40 * math.sin(tv) if 12 <= tv < 60 else 0),
             "rot_y": r(0, 3),
             "rot_z": r(0, 3) + (90 if 12 <= tv < 60 else 0),
-            "gps_hora": datetime.now(UTC).strftime("%H:%M:%S"),
-            "gps_latitud": -53.7860 + 0.00002 * self.deriva + r(0, 0.000005),
-            "gps_longitud": -67.7000 + 0.00003 * self.deriva + r(0, 0.000005),
-            "gps_altitud": 30 + alt + r(0, 2),
-            "gps_satelites": 9,
-            "eco_comando": self.eco,
+            # Descenso
+            "estado_descenso2": "TRIGGERED" if liberado else "ARMED",
+            "servo": 90 if liberado else 0,
+            # Enlace
+            "potencia_tx": 20,
+            # Telecomandos
+            "eco_id": self.eco_id,
+            "eco_codigo": self.eco_codigo,
+            "resultado_comando": self.resultado_comando,
+            "extra_id": self.extra_id,
+            "extra_valor": self.extra_valor,
         }
+        assert p.keys() == self.historia.keys(), "el simulador no arma los campos del .toml"
         if self.sin_fix:  # 0 satélites es un dato real; la posición, sin dato
             nan = float("nan")
             p.update(gps_latitud=nan, gps_longitud=nan, gps_altitud=nan, gps_satelites=0)
@@ -285,17 +317,37 @@ class Simulador:
             self.paso()
 
     def telecomando(self, nombre: str, argumento: str = "") -> None:
-        if nombre == "altitud cero":
-            self.offset_alt += self.ultimo.get("altitud", 0.0)
-        if nombre == "cortar":
-            self.eco = "cortar"
-            self.paso()
-            self.cortado = True
+        """Llega un telecomando: vuelve como eco (número, código y resultado).
+
+        `nombre` es el de `telecomandos.toml` (CAL_ALT, CX…). De juguete: sólo
+        se rechaza un código desconocido o uno fuera de `solo_en_estado`.
+        """
+        nombre = nombre.upper()
+        comando = COMANDOS.get(nombre)
+        estado = self.ultimo.get("estado_fsw", "STANDBY")
+        aceptado = comando is not None and estado in comando.get("solo_en_estado", [estado])
+        self.eco_id += 1
+        self.eco_codigo = nombre if comando else f"?{nombre}"
+        self.resultado_comando = "ACCEPTED" if aceptado else "REJECTED"
+        if not aceptado:
             return
-        self.eco = f"{nombre} {argumento}".strip()
+        if nombre == "CAL_ALT":
+            self.offset_alt += self.ultimo.get("altitud", 0.0)
+        if nombre == "GET_SENSORS":  # F4: responde por el par extra
+            self.extra_id, self.extra_valor = nombre, 0b11111  # los cinco sensores
+        if nombre == "CX" and argumento.upper() == "OFF":
+            self.paso()  # el eco sale en un último paquete
+            self.cortado = True
 
 
 # --- piezas comunes -------------------------------------------------------
+
+
+def texto_eco(p: dict) -> str:
+    """Los tres campos del eco en una línea: «#3 CAL_ALT ACCEPTED»."""
+    if not p.get("eco_id"):
+        return "—"
+    return f"#{p['eco_id']} {p['eco_codigo']} {p['resultado_comando']}"
 
 
 def configurar_pyqtgraph() -> None:
@@ -350,10 +402,10 @@ class PanelComandos(QWidget):
         caja = QVBoxLayout(self) if vertical else QHBoxLayout(self)
         caja.setContentsMargins(4, 4, 4, 4)
         botones = [
-            ("Altitud cero", "altitud cero", True),
-            ("Hora UTC", "hora utc", False),
-            ("Datos extra", "datos extra", False),
-            ("Cortar la telemetría", "cortar", True),
+            ("Altitud cero", "CAL_ALT", True),
+            ("Hora UTC", "TIME_SET", False),
+            ("Datos extra", "GET_SENSORS", False),
+            ("Cortar la telemetría", "CX OFF", True),
         ]
         for texto, nombre, confirmar in botones:
             b = QPushButton(texto)
@@ -375,22 +427,21 @@ class PanelComandos(QWidget):
             r = QMessageBox.question(self, "Confirmar", f"¿Mandar «{texto}»?")
             if r != QMessageBox.StandardButton.Yes:
                 return
-        arg = datetime.now(UTC).strftime("%H:%M:%S") if nombre == "hora utc" else ""
-        self.sim.telecomando(nombre, arg)
+        self.sim.telecomando(*nombre.split())
 
     def mandar_linea(self) -> None:
-        if self.linea.text().strip():
-            self.sim.telecomando(self.linea.text().strip())
+        if partes := self.linea.text().split():
+            self.sim.telecomando(*partes[:2])
             self.linea.clear()
 
     def actualizar(self) -> None:
-        self.eco.setText(f"Eco: {self.sim.ultimo.get('eco_comando') or '—'}")
+        self.eco.setText(f"Eco: {texto_eco(self.sim.ultimo)}")
 
 
 GRAFICOS_G7 = [
     ("Altitud", "m", ["altitud"]),
-    ("Tensión", "V", ["tension"]),
-    ("Corriente", "A", ["corriente"]),
+    ("Tensión", "V", ["tension_bateria"]),
+    ("Corriente", "A", ["corriente_bateria"]),
     ("Aceleración", "m/s²", ["acel_x", "acel_y", "acel_z"]),
     ("Velocidad de rotación", "°/s", ["rot_x", "rot_y", "rot_z"]),
 ]
@@ -663,8 +714,8 @@ class VarianteC(QWidget):
             ),
             Tarjeta(
                 "Energía",
-                ["tension", "corriente"],
-                ("Tensión", "V", ["tension"]),
+                ["tension_bateria", "corriente_bateria"],
+                ("Tensión", "V", ["tension_bateria"]),
             ),
             Tarjeta(
                 "Aceleración",
@@ -678,13 +729,13 @@ class VarianteC(QWidget):
             ),
             Tarjeta(
                 "GPS",
-                ["gps_hora", "gps_latitud", "gps_longitud", "gps_altitud", "gps_satelites"],
+                ["gps_latitud", "gps_longitud", "gps_altitud", "gps_satelites"],
             ),
         ]
         # La corriente también tiene que graficarse (G7): segunda curva en Energía.
         energia = self.tarjetas[2]
         w = energia.findChild(pg.PlotWidget)
-        energia.curvas["corriente"] = w.plot(pen=pg.mkPen(COLORES["dos"], width=TRAZO))
+        energia.curvas["corriente_bateria"] = w.plot(pen=pg.mkPen(COLORES["dos"], width=TRAZO))
         w.setTitle("<b>Tensión [V] y corriente [A]</b>", size=f"{PT}pt")
 
         g.addWidget(self.tarjetas[0], 0, 0)
@@ -724,7 +775,7 @@ ETIQUETA_GCS = {
     **{f"acel_{e}": f"{e} [m/s²]" for e in "xyz"},
     **{f"rot_{e}": f"{e} [°/s]" for e in "xyz"},
 }
-FASES = ["STANDBY", "ASCENT", "DESCENT 1", "DESCENT 2", "LANDED"]
+FASES = ["STANDBY", "ASCENT", "DESCENT_1", "DESCENT_2", "LANDED"]
 
 
 def indice_fase(estado: str) -> int:
@@ -732,7 +783,7 @@ def indice_fase(estado: str) -> int:
     return FASES.index(estado) if estado in FASES else -1
 
 
-BANDA = {"DESCENT 1": (15, 3, "C3"), "DESCENT 2": (5, 3, "C4")}  # bajada [m/s]
+BANDA = {"DESCENT_1": (15, 3, "C3"), "DESCENT_2": (5, 3, "C4")}  # bajada [m/s]
 NIVEL = {
     "ok": "background: #e8f6ee; color: #145a32; border: 2px solid #1e8449;",
     "aviso": "background: #fdf2e0; color: #6e4608; border: 2px solid #b9770e;",
@@ -892,7 +943,7 @@ class Franja(QWidget):
         ("recibidos", "Recibidos"),
         ("perdidos", "Perdidos"),
         ("descartados", "Descartados"),
-        ("eco_comando", "Eco del comando"),
+        ("eco", "Eco del comando"),
     ]
 
     def __init__(self, con_estado: bool = True) -> None:
@@ -939,7 +990,7 @@ class Hibrido(QWidget):
         self.franja = Franja(self.con_estado)
         self.modo_global = "vivo"
         self.franja.toggle.clicked.connect(self.alternar_global)
-        gps = ["gps_latitud", "gps_longitud", "gps_altitud", "gps_satelites", "gps_hora"]
+        gps = ["gps_latitud", "gps_longitud", "gps_altitud", "gps_satelites"]
         vuelo = ["altitud", "vel_vertical", "presion", "temperatura"]
         self.t = {
             "vuelo": self.clase_tarjeta(
@@ -950,8 +1001,8 @@ class Hibrido(QWidget):
             ),
             "energia": self.clase_tarjeta(
                 "Energía",
-                ["tension", "corriente"],
-                [("Tensión", "V", ["tension"]), ("Corriente", "A", ["corriente"])],
+                ["tension_bateria", "corriente_bateria"],
+                [("Tensión", "V", ["tension_bateria"]), ("Corriente", "A", ["corriente_bateria"])],
                 columnas=2,
             ),
             "acel": self.clase_tarjeta(
@@ -986,6 +1037,7 @@ class Hibrido(QWidget):
             "perdidos": s.perdidos,
             "descartados": s.descartados,
             "vel_vertical": s.vel_vertical,
+            "eco": texto_eco(s.ultimo),
         }
         self.franja.actualizar(datos)
         for t in self.t.values():
