@@ -74,7 +74,7 @@ generate the Pico's C header from it.
 | Folder | What it is | Status |
 |---|---|---|
 | [`gcs/`](gcs/) | Ground station (Python, PySide6 and pyqtgraph) | **Skeleton:** structure, dependencies and CI. It does nothing useful yet. |
-| [`protocolo/`](protocolo/) | Telemetry and telecommand format, shared by everything else | **Version 2:** 75-byte binary packet with a CCSDS header and CRC-16, 32 fields grouped by block, each with its English label. Telecommands, **version 1** (#11): 14-byte binary packet with the same header, 19 commands; queries answer through the telemetry's extra pair. |
+| [`protocolo/`](protocolo/) | Telemetry and telecommand format, shared by everything else | **Version 2:** 75-byte binary packet with a CCSDS header and CRC-16, 32 fields grouped by block, each with its English label. Telecommands, **version 1** (#11): 14-byte binary packet with the same header, 19 commands; queries answer through the telemetry's extra pair. `vista_formato.py` (#16) generates the field tables and an example packet in ASCII and binary, as Markdown and CSV, for the PDR. |
 | [`firmware/pico/`](firmware/pico/) | Flight software for the Raspberry Pi Pico 2 | No code yet |
 | [`firmware/heltec/`](firmware/heltec/) | LoRa link, on board and on the ground | No code yet |
 | [`firmware/camaras/`](firmware/camaras/) | ESP32-S3-CAM N16R8 cameras with OV5640 | No code yet |

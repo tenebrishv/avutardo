@@ -85,3 +85,24 @@ de 16 bits.
 Los tests de `gcs/tests/test_telecomandos_toml.py` controlan que el archivo
 esté bien formado, que coincida con la tabla acordada y que sus estados y
 modos existan en `telemetria.toml`.
+
+## Vista sin codificar, para la PDR (#16)
+
+`vista_formato.py` genera, desde los dos `.toml`, lo que la PDR muestra del
+formato: la tabla de campos de la telemetría y la de los telecomandos (bytes,
+etiqueta, unidad, tipo, largo y requisito), los 19 códigos de comando y el
+mismo paquete en una línea ASCII, al estilo de la planilla de infraestructura,
+contra el binario en hex, con su largo y su tiempo en el aire a SF9.
+
+```bash
+uv run protocolo/vista_formato.py   # desde la raíz del repo
+```
+
+Deja `formato.md` y cuatro CSV en `vista/`. No se editan a mano: si cambia un
+`.toml`, se vuelve a correr el script. `gcs/tests/test_vista_formato.py`
+controla que los archivos estén al día, que los largos sean 75 B y 14 B y que
+los tiempos en el aire sean los de arriba.
+
+La línea ASCII lleva el APID, el contador y los 32 campos, con los decimales
+que da cada divisor; no lleva la versión ni el CRC. Es para comparar tamaños:
+el formato que vuela es el binario.
