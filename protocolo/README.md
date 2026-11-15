@@ -1,7 +1,8 @@
 # protocolo
 
-El formato de telemetría es compartido por la Pico, la Heltec y la estación
-terrena, y vive en un solo lugar: **`telemetria.toml`**.
+El formato de telemetría y el de los telecomandos son compartidos por la Pico,
+la Heltec y la estación terrena, y cada uno vive en un solo lugar:
+**`telemetria.toml`** y **`telecomandos.toml`**.
 
 - La estación terrena lo lee al arrancar: el decodificador es el único módulo
   que conoce el formato.
@@ -33,7 +34,7 @@ Los campos van agrupados por bloque:
 | Inercial (LSM6DSO32) | aceleración y velocidad de rotación en 3 ejes |
 | Descenso | estado del segundo descenso y ángulo ordenado al servo |
 | Enlace | potencia de transmisión |
-| Telecomandos | eco (número, código y resultado) y un par extra reservado |
+| Telecomandos | eco (número, código y resultado) y el par extra, la respuesta a la última consulta |
 
 Cada campo tiene un `nombre` en español y una `etiqueta` en inglés
 (`BAT_VOLTAGE`), que usan el encabezado del CSV (`BAT_VOLTAGE [V]`) y la
@@ -51,7 +52,36 @@ campos. Desde el primer paquete real, los campos nuevos van siempre al final.
 Los tests de `gcs/tests/test_telemetria_toml.py` controlan que el archivo esté
 bien formado y que coincida con la tabla acordada.
 
-## Pendiente
+## Telecomandos, versión 1 (#11)
 
-- **Formato de los telecomandos**, con sus códigos (`eco_codigo`) y el
-  significado del par extra (`extra_id`, `extra_valor`): #11.
+Un telecomando binario de 14 B, big-endian, con la misma cabecera que la
+telemetría y el tipo TC. A SF9 tarda 181 ms en el aire.
+
+| Bytes | Qué lleva |
+|---|---|
+| 0–5 | Cabecera primaria CCSDS 133.0-B-2: APID 106, tipo TC y el número de telecomando en el contador de 14 bits |
+| 6 | Versión del formato de telecomandos (independiente de la de telemetría) |
+| 7 | Código del comando: su posición en el `.toml`, desde 0 |
+| 8–11 | Parámetro, int32: un código de `valores`, un número en su unidad, o 0 |
+| 12–13 | CRC-16/CCITT-FALSE sobre los bytes 0–11 |
+
+Son 19 comandos en ocho grupos: comunicaciones (`CX`, `TX_POWER`), hora
+(`TIME_SET`, `TIME_SYNC`), calibración (`CAL_ALT`, `CAL_IMU`), simulación
+(`SIM`, `SIMP`), descenso (`SERVO`, `DESCENT2`), cámaras (`CAM1`, `CAM2`),
+consultas y misión (`RESET_MISSION`).
+
+No hay ACK aparte: el eco de cada paquete de telemetría (`eco_id`,
+`eco_codigo`, `resultado_comando`) confirma el último telecomando que llegó
+(ADR 0003). El `.toml` dice, para cada comando, en qué estados o modos se
+acepta, el rango de su parámetro y si es un comando con confirmación.
+
+Las **consultas** (`CAM_STATUS`, `GET_SENSORS`, `TIME_STATUS`, `GET_P0`,
+`GET_RESETS`, `GET_BAT`) responden por el **par extra** de la telemetría:
+`extra_id` lleva el código de la consulta y `extra_valor` la respuesta, que se
+repite en cada paquete hasta la consulta siguiente. El `.toml` fija la forma de
+cada respuesta: un número, un mapa de bits, una lista de valores o dos mitades
+de 16 bits.
+
+Los tests de `gcs/tests/test_telecomandos_toml.py` controlan que el archivo
+esté bien formado, que coincida con la tabla acordada y que sus estados y
+modos existan en `telemetria.toml`.

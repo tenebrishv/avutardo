@@ -27,8 +27,9 @@ cada paquete de telemetría hasta el siguiente. Es la confirmación de que lleg�
 _Evitar_: confirmación de ejecución, acuse aparte
 
 **Rechazado**:
-Un telecomando que llegó pero el CanSat no ejecuta: código desconocido,
-parámetro fuera de rango o comando bloqueado en el modo o el estado actual.
+Un telecomando que llegó pero el CanSat no ejecuta: otra versión del formato,
+código desconocido, parámetro fuera de rango o comando bloqueado en el modo o
+el estado actual.
 Viaja junto con el eco; un rechazado no se reintenta.
 _Evitar_: fallido, perdido
 
@@ -37,6 +38,17 @@ Un telecomando que no apareció en el eco después de tres intentos; en
 pantalla, *NO ACK*.
 _Evitar_: sin confirmación (eso es otra cosa: ver comando con confirmación),
 perdido, rechazado
+
+**Consulta**:
+Un telecomando que pide un dato que no viaja en el paquete de telemetría; la
+respuesta llega en el par extra (F4).
+_Evitar_: pedido de datos, comando de diagnóstico
+
+**Par extra**:
+El lugar del paquete de telemetría donde viaja la respuesta a la última
+consulta: qué consulta responde y su valor. Se repite en cada paquete hasta la
+consulta siguiente, como el eco.
+_Evitar_: datos adicionales, campo libre
 
 **Comando con confirmación**:
 Un telecomando que la estación terrena pide confirmar antes de mandarlo, porque
@@ -49,8 +61,9 @@ pide X2 y separa nuestros paquetes de los de otros equipos.
 _Evitar_: ID de equipo, dirección, dirección de destino
 
 **Versión del formato**:
-El número que identifica qué edición de `protocolo/telemetria.toml` armó un
-paquete; no es la versión CCSDS de la cabecera.
+El número que identifica qué edición del formato armó un paquete de telemetría
+o un telecomando. La telemetría y los telecomandos llevan cada uno la suya, y
+suben por separado. No es la versión CCSDS de la cabecera.
 _Evitar_: versión del protocolo
 
 **Puente**:

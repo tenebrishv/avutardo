@@ -59,8 +59,9 @@ flowchart LR
   telecomandos.
 
 El formato de los paquetes está escrito una sola vez, en
-[`protocolo/telemetria.toml`](protocolo/telemetria.toml): la estación terrena lo
-lee al arrancar y, cuando exista la FSW, un script va a generar el encabezado C
+[`protocolo/telemetria.toml`](protocolo/telemetria.toml) y
+[`protocolo/telecomandos.toml`](protocolo/telecomandos.toml): la estación
+terrena los lee al arrancar y, cuando exista la FSW, un script va a generar el encabezado C
 de la Pico desde ahí.
 
 ## Estado
@@ -68,7 +69,7 @@ de la Pico desde ahí.
 | Carpeta | Qué es | Estado |
 |---|---|---|
 | [`gcs/`](gcs/) | Estación terrena (Python, PySide6 y pyqtgraph) | **Esqueleto:** estructura, dependencias y CI. Todavía no hace nada útil. |
-| [`protocolo/`](protocolo/) | Formato de telemetría, compartido por todo lo demás | **Versión 2:** paquete binario de 75 B con cabecera CCSDS y CRC-16, 32 campos agrupados por bloque, cada uno con su etiqueta en inglés. Faltan los telecomandos, con sus códigos y el par extra (#11). |
+| [`protocolo/`](protocolo/) | Formato de telemetría y de telecomandos, compartido por todo lo demás | **Versión 2:** paquete binario de 75 B con cabecera CCSDS y CRC-16, 32 campos agrupados por bloque, cada uno con su etiqueta en inglés. Telecomandos, **versión 1** (#11): 14 B binarios con la misma cabecera, 19 comandos; las consultas responden por el par extra de la telemetría. |
 | [`firmware/pico/`](firmware/pico/) | Software de vuelo de la Raspberry Pi Pico 2 | Sin código |
 | [`firmware/heltec/`](firmware/heltec/) | Enlace LoRa, a bordo y en tierra | Sin código |
 | [`firmware/camaras/`](firmware/camaras/) | Cámaras ESP32-S3-CAM N16R8 con OV5640 | Sin código |
