@@ -1,0 +1,6 @@
+Bytes,Etiqueta,Unidad,Tipo,Largo [B],Requisito
+0–5,(cabecera CCSDS),,CCSDS,6,X2
+6,(versión),,uint8,1,
+7,(código),,uint8,1,G15
+8–11,(parámetro),,int32,4,
+12–13,(CRC-16),,uint16,2,
