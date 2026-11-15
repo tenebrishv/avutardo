@@ -149,3 +149,14 @@ def test_los_archivos_de_la_vista_estan_al_dia_con_los_toml(vista):
     for nombre, contenido in generados.items():
         en_disco = (PROTOCOLO / "vista" / nombre).read_text(encoding="utf-8")
         assert en_disco == contenido, f"{nombre} está desactualizado"
+
+
+def test_un_codigo_desconocido_se_lee_como_signo_de_pregunta(vista, formatos):
+    telemetria, _ = formatos
+    estado = next(c for c in telemetria["campo"] if c["nombre"] == "estado_fsw")
+    assert vista.texto(estado, 7) == "?7"  # la regla de `valores` en el .toml
+
+
+def test_la_cabecera_no_acepta_un_contador_de_mas_de_14_bits(vista):
+    with pytest.raises(ValueError):
+        vista.cabecera_ccsds(vista.TM, 106, 2**14, 75)

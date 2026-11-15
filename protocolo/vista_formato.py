@@ -103,6 +103,8 @@ def entero(campo: dict, valor) -> int:
 
 def cabecera_ccsds(tipo: int, apid: int, contador: int, largo_paquete: int) -> bytes:
     """Cabecera primaria CCSDS 133.0-B-2: versión 0, sin secundaria, flags 11."""
+    if not (0 <= apid < 2**11 and 0 <= contador < 2**14):
+        raise ValueError(f"APID {apid} o contador {contador} fuera de sus 11 y 14 bits")
     identificacion = tipo << 12 | apid
     secuencia = 0b11 << 14 | contador
     largo_datos = largo_paquete - 6 - 1  # octetos del campo de datos, menos 1
@@ -178,7 +180,8 @@ def texto(campo: dict, crudo: int) -> str:
     if crudo == centinela(campo["tipo"]):
         return "NA"
     if "valores" in campo:
-        return campo["valores"][crudo]
+        valores = campo["valores"]
+        return valores[crudo] if crudo < len(valores) else f"?{crudo}"
     if campo.get("mostrar") == "hora_utc":
         return datetime.fromtimestamp(crudo, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     divisor = campo.get("divisor", 1)
