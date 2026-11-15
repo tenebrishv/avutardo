@@ -26,3 +26,4 @@ desktop.ini
 # Claude Code: guía y permisos locales de cada uno (rutas de esta PC)
 CLAUDE.md
 .claude/settings.local.json
+.claude/worktrees/
