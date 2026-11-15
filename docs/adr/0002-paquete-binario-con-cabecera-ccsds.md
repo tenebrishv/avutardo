@@ -13,6 +13,10 @@ centinela de su tipo. La forma exacta vive en `protocolo/telemetria.toml`. Se
 decidió entre el 2026-11-07 y el 2026-11-09, en el grilling del formato de
 telemetría (issue #10).
 
+> **2026-11-14, versión 2 del formato:** el paquete pasa a 75 B (32 campos) y
+> tarda 447 ms a SF9; la decisión no cambia. Las cifras de abajo son las de la
+> versión 1. El margen con el telecomando está en la ADR 0003.
+
 ## Por qué
 
 - **Tiempo en el aire.** El paquete y un telecomando tienen que entrar en el

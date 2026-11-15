@@ -1,29 +1,33 @@
 # ============================================================================
-#  Formato de telemetría del CanSat Avutardo — versión 1 (issue #10).
+#  Formato de telemetría del CanSat Avutardo — versión 2 (issue #10).
 #
 #  Única fuente del formato: la FSW de la Pico arma el paquete con él y la
 #  estación terrena lo decodifica con él. Un campo se cambia acá, nunca en el
 #  código.
 #
-#  Paquete de 61 B, big-endian, campo por campo:
+#  Paquete de 75 B, big-endian, campo por campo:
 #
 #    bytes  0–5   cabecera primaria CCSDS 133.0-B-2, sin cabecera secundaria,
 #                 flags de secuencia 11, APID de [cabecera] y tipo TM; su
 #                 contador de 14 bits es el contador de secuencia (F1)
 #    byte   6     versión del formato (`version`, abajo)
-#    bytes  7–58  los campos, en el orden de este archivo
-#    bytes 59–60  CRC-16/CCITT-FALSE sobre los bytes 0–58
+#    bytes  7–72  los campos, en el orden de este archivo, agrupados por bloque
+#    bytes 73–74  CRC-16/CCITT-FALSE sobre los bytes 0–72
+#
+#  A SF9, BW 125 kHz, CR 4/5 y preámbulo 12, el paquete tarda 447 ms en el aire.
 #
 #  Reglas:
 #  - Un solo tipo de paquete, a 1 Hz. Cuando el GPS se lee cada 10 s, sus
 #    campos repiten el último valor.
 #  - Sin dato = centinela: el mínimo del tipo si es con signo, el máximo si es
 #    sin signo (255, 65 535…). No lleva clave: sale del tipo.
-#  - Los campos nuevos van siempre AL FINAL y la versión sube en 1.
+#  - La versión 1 nunca salió del simulador, así que la 2 reordena por bloque.
+#    Desde el primer paquete real, los campos nuevos van siempre AL FINAL y la
+#    versión sube en 1.
 #  - Los parámetros de radio (SF, ancho de banda, preámbulo) no van acá.
 # ============================================================================
 
-version = 1
+version = 2
 
 [enlace]
 codificacion = "binario"
@@ -38,12 +42,15 @@ linea_puente = "<hex>,<rssi>,<snr>\n"
 apid = 106
 
 # Cada [[campo]] lleva:
-#   nombre       identificador del campo (columna del CSV)
+#   nombre       identificador del campo, en español
+#   etiqueta     nombre en inglés de la planilla de infraestructura; lo usan el
+#                encabezado del CSV (BAT_VOLTAGE [V]) y la pantalla
 #   tipo         uint8 | int16 | uint16 | int32 | uint32
 #   divisor      valor físico = entero / divisor (por defecto 1); de él salen
 #                los decimales del CSV
 #   unidad       SI, o vacía si el campo no tiene unidad
-#   requisito    código del Anexo A v2 que lo pide
+#   requisito    código del Anexo A v2 que lo pide; vacío si el anexo no lo
+#                pide y lo eligió el equipo
 #   descripcion
 # y, opcionales:
 #   valores      nombres de los códigos 0, 1, 2… (sólo uint8); un código
@@ -52,16 +59,29 @@ apid = 106
 #                CSV en ISO 8601 (2026-11-07T13:48:05Z)
 #   reservado    true: viaja en el paquete, pero no se muestra ni va al CSV
 
+# --- Operación ---------------------------------------------------------------
+
 [[campo]]
 nombre = "estado_fsw"
+etiqueta = "STATE"
 tipo = "uint8"
 unidad = ""
 requisito = "G8"
-valores = ["BOOT", "STANDBY", "ASCENT", "DESCENT 1", "DESCENT 2", "LANDED"]
+valores = ["BOOT", "STANDBY", "ASCENT", "DESCENT_1", "DESCENT_2", "LANDED"]
 descripcion = "Estado del software de vuelo"
 
 [[campo]]
+nombre = "modo"
+etiqueta = "MODE"
+tipo = "uint8"
+unidad = ""
+requisito = ""
+valores = ["FLIGHT", "SIM_PRESSURE", "SIM_FULL", "MANUAL"]
+descripcion = "De dónde salen los datos; MANUAL es sólo para pruebas de banco"
+
+[[campo]]
 nombre = "hora"
+etiqueta = "RTC_DATETIME"
 tipo = "uint32"
 unidad = "s"
 requisito = "F3"
@@ -70,28 +90,34 @@ descripcion = "Hora UTC del CanSat (DS3231), segundos Unix"
 
 [[campo]]
 nombre = "tiempo_mision"
+etiqueta = "MISSION_TIME"
 tipo = "uint16"
 unidad = "s"
 requisito = "G3 F2"
-descripcion = "Tiempo de misión; persiste a través de reinicios"
+descripcion = "Segundos desde el comienzo de misión (X3); antes, sin dato. Persiste a través de reinicios"
 
-[[campo]]
-nombre = "altitud"
-tipo = "int16"
-divisor = 10
-unidad = "m"
-requisito = "X5 SN1"
-descripcion = "Altitud barométrica respecto de la rampa"
+# --- Ambiental ---------------------------------------------------------------
 
 [[campo]]
 nombre = "presion"
+etiqueta = "PRESSURE"
 tipo = "uint32"
 unidad = "Pa"
 requisito = "X5"
 descripcion = "Presión atmosférica (BME280)"
 
 [[campo]]
+nombre = "altitud"
+etiqueta = "ALT_BARO"
+tipo = "int16"
+divisor = 10
+unidad = "m"
+requisito = "X5 SN1"
+descripcion = "Altitud barométrica respecto de la rampa, calculada a bordo"
+
+[[campo]]
 nombre = "temperatura"
+etiqueta = "TEMPERATURE"
 tipo = "int16"
 divisor = 100
 unidad = "°C"
@@ -99,87 +125,74 @@ requisito = "X5 SN2"
 descripcion = "Temperatura interna (BME280)"
 
 [[campo]]
-nombre = "tension"
+nombre = "humedad"
+etiqueta = "HUMIDITY"
+tipo = "uint8"
+unidad = "%"
+requisito = ""
+descripcion = "Humedad relativa (BME280)"
+
+# --- Energía (INA3221) -------------------------------------------------------
+
+[[campo]]
+nombre = "tension_bateria"
+etiqueta = "BAT_VOLTAGE"
 tipo = "uint16"
 divisor = 1000
 unidad = "V"
 requisito = "SN3 G7"
-descripcion = "Tensión del pack (INA226)"
+descripcion = "Tensión de la batería (INA3221)"
 
 [[campo]]
-nombre = "corriente"
+nombre = "corriente_bateria"
+etiqueta = "BAT_CURRENT"
 tipo = "int16"
 divisor = 1000
 unidad = "A"
 requisito = "SN8 G7"
-descripcion = "Corriente del pack (INA226)"
+descripcion = "Corriente de la batería (INA3221)"
 
 [[campo]]
-nombre = "panel"
+nombre = "tension_3v3"
+etiqueta = "BUS33_VOLTAGE"
+tipo = "uint16"
+divisor = 1000
+unidad = "V"
+requisito = ""
+descripcion = "Tensión de la barra de 3.3 V (INA3221)"
+
+[[campo]]
+nombre = "corriente_3v3"
+etiqueta = "BUS33_CURRENT"
+tipo = "int16"
+divisor = 1000
+unidad = "A"
+requisito = ""
+descripcion = "Corriente de la barra de 3.3 V (INA3221)"
+
+[[campo]]
+nombre = "tension_panel"
+etiqueta = "SOLAR_VOLTAGE"
 tipo = "uint16"
 divisor = 1000
 unidad = "V"
 requisito = "X6"
-descripcion = "Tensión del panel solar"
+descripcion = "Tensión del panel solar (INA3221)"
 
 [[campo]]
-nombre = "acel_x"
+nombre = "corriente_panel"
+etiqueta = "SOLAR_CURRENT"
 tipo = "int16"
-divisor = 100
-unidad = "m/s²"
-requisito = "X5 SN5"
-descripcion = "Aceleración, eje x (LSM6DSV32X)"
+divisor = 1000
+unidad = "A"
+requisito = "X6"
+descripcion = "Corriente del panel solar (INA3221)"
 
-[[campo]]
-nombre = "acel_y"
-tipo = "int16"
-divisor = 100
-unidad = "m/s²"
-requisito = "X5 SN5"
-descripcion = "Aceleración, eje y (LSM6DSV32X)"
-
-[[campo]]
-nombre = "acel_z"
-tipo = "int16"
-divisor = 100
-unidad = "m/s²"
-requisito = "X5 SN5"
-descripcion = "Aceleración, eje z (LSM6DSV32X)"
-
-[[campo]]
-nombre = "rot_x"
-tipo = "int16"
-divisor = 10
-unidad = "°/s"
-requisito = "X5 SN5"
-descripcion = "Velocidad de rotación, eje x (LSM6DSV32X, ±2000 °/s)"
-
-[[campo]]
-nombre = "rot_y"
-tipo = "int16"
-divisor = 10
-unidad = "°/s"
-requisito = "X5 SN5"
-descripcion = "Velocidad de rotación, eje y (LSM6DSV32X, ±2000 °/s)"
-
-[[campo]]
-nombre = "rot_z"
-tipo = "int16"
-divisor = 10
-unidad = "°/s"
-requisito = "X5 SN5"
-descripcion = "Velocidad de rotación, eje z (LSM6DSV32X, ±2000 °/s)"
-
-[[campo]]
-nombre = "gps_hora"
-tipo = "uint32"
-unidad = "s"
-requisito = "SN4"
-mostrar = "hora_utc"
-descripcion = "Hora UTC del GPS, segundos Unix"
+# --- Navegación --------------------------------------------------------------
 
 [[campo]]
 nombre = "gps_latitud"
+etiqueta = "GPS_LATITUDE"
 tipo = "int32"
 divisor = 10_000_000
 unidad = "°"
@@ -188,6 +201,7 @@ descripcion = "Latitud, grados decimales (norte positivo)"
 
 [[campo]]
 nombre = "gps_longitud"
+etiqueta = "GPS_LONGITUDE"
 tipo = "int32"
 divisor = 10_000_000
 unidad = "°"
@@ -196,6 +210,7 @@ descripcion = "Longitud, grados decimales (este positivo)"
 
 [[campo]]
 nombre = "gps_altitud"
+etiqueta = "GPS_ALTITUDE"
 tipo = "int32"
 divisor = 10
 unidad = "m"
@@ -204,15 +219,136 @@ descripcion = "Altitud GPS sobre el nivel del mar"
 
 [[campo]]
 nombre = "gps_satelites"
+etiqueta = "GPS_SATS"
 tipo = "uint8"
 unidad = ""
 requisito = "X5 SN4"
 descripcion = "Satélites en uso; 0 es un dato real (sin fix)"
 
+# --- Inercial (LSM6DSO32) ----------------------------------------------------
+
 [[campo]]
-nombre = "eco_comando"
+nombre = "acel_x"
+etiqueta = "ACCEL_X"
+tipo = "int16"
+divisor = 100
+unidad = "m/s²"
+requisito = "X5 SN5"
+descripcion = "Aceleración, eje x (LSM6DSO32)"
+
+[[campo]]
+nombre = "acel_y"
+etiqueta = "ACCEL_Y"
+tipo = "int16"
+divisor = 100
+unidad = "m/s²"
+requisito = "X5 SN5"
+descripcion = "Aceleración, eje y (LSM6DSO32)"
+
+[[campo]]
+nombre = "acel_z"
+etiqueta = "ACCEL_Z"
+tipo = "int16"
+divisor = 100
+unidad = "m/s²"
+requisito = "X5 SN5"
+descripcion = "Aceleración, eje z (LSM6DSO32)"
+
+[[campo]]
+nombre = "rot_x"
+etiqueta = "GYRO_X"
+tipo = "int16"
+divisor = 10
+unidad = "°/s"
+requisito = "X5 SN5"
+descripcion = "Velocidad de rotación, eje x (LSM6DSO32, ±2000 °/s)"
+
+[[campo]]
+nombre = "rot_y"
+etiqueta = "GYRO_Y"
+tipo = "int16"
+divisor = 10
+unidad = "°/s"
+requisito = "X5 SN5"
+descripcion = "Velocidad de rotación, eje y (LSM6DSO32, ±2000 °/s)"
+
+[[campo]]
+nombre = "rot_z"
+etiqueta = "GYRO_Z"
+tipo = "int16"
+divisor = 10
+unidad = "°/s"
+requisito = "X5 SN5"
+descripcion = "Velocidad de rotación, eje z (LSM6DSO32, ±2000 °/s)"
+
+# --- Descenso ----------------------------------------------------------------
+
+[[campo]]
+nombre = "estado_descenso2"
+etiqueta = "DESCENT2_STATUS"
+tipo = "uint8"
+unidad = ""
+requisito = "C4"
+valores = ["NOT_ARMED", "ARMED", "TRIGGERED"]
+descripcion = "Estado del segundo descenso (no es el estado DESCENT_2 de la FSW)"
+
+[[campo]]
+nombre = "servo"
+etiqueta = "SERVO_CMD"
+tipo = "uint8"
+unidad = "°"
+requisito = "C4"
+descripcion = "Ángulo ordenado al servo de liberación del segundo descenso"
+
+# --- Enlace ------------------------------------------------------------------
+
+[[campo]]
+nombre = "potencia_tx"
+etiqueta = "TX_POWER"
+tipo = "uint8"
+unidad = "dBm"
+requisito = ""
+descripcion = "Potencia de transmisión que la Pico le configuró a la Heltec"
+
+# --- Telecomandos (ADR 0003 y #11) -------------------------------------------
+
+[[campo]]
+nombre = "eco_id"
+etiqueta = "CMD_ECHO_ID"
 tipo = "uint16"
 unidad = ""
 requisito = "G15"
-reservado = true
-descripcion = "Último telecomando recibido y ejecutado (verificación en tierra)"
+descripcion = "Eco: número del último telecomando que llegó (ADR 0003)"
+
+[[campo]]
+nombre = "eco_codigo"
+etiqueta = "CMD_ECHO"
+tipo = "uint8"
+unidad = ""
+requisito = "G15"
+descripcion = "Eco: código del último telecomando que llegó (protocolo/telecomandos.toml)"
+
+[[campo]]
+nombre = "resultado_comando"
+etiqueta = "CMD_RESULT"
+tipo = "uint8"
+unidad = ""
+requisito = "G15"
+valores = ["ACCEPTED", "REJECTED"]
+descripcion = "Si el último telecomando que llegó se aceptó o se rechazó"
+
+[[campo]]
+nombre = "extra_id"
+etiqueta = "EXTRA_ID"
+tipo = "uint8"
+unidad = ""
+requisito = "F4"
+descripcion = "Par extra: código de la consulta que responde extra_valor (protocolo/telecomandos.toml)"
+
+[[campo]]
+nombre = "extra_valor"
+etiqueta = "EXTRA_VALUE"
+tipo = "int32"
+unidad = ""
+requisito = "F4"
+descripcion = "Par extra: respuesta a la última consulta; se repite hasta la siguiente"

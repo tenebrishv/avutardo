@@ -15,10 +15,40 @@ Una orden que la estación terrena le manda al CanSat; usa la misma cabecera
 que el paquete de telemetría, con el tipo TC.
 _Evitar_: comando de tierra, mensaje de subida
 
+**Número de telecomando**:
+El número que la estación terrena pone en cada telecomando; un reintento
+repite el mismo número, así el CanSat no ejecuta dos veces la misma orden.
+_Evitar_: contador de secuencia (ése es el de la telemetría)
+
 **Eco**:
-El último telecomando que el CanSat recibió y ejecutó, devuelto en la
-telemetría para verificarlo en tierra (G15).
-_Evitar_: acuse, ACK, confirmación
+El número y el código del último telecomando que llegó al CanSat, repetidos en
+cada paquete de telemetría hasta el siguiente. Es la confirmación de que llegó
+(el ACK), no de que se ejecutó: eso se verifica por el efecto.
+_Evitar_: confirmación de ejecución, acuse aparte
+
+**Rechazado**:
+Un telecomando que llegó pero el CanSat no ejecuta: otra versión del formato,
+código desconocido, parámetro fuera de rango o comando bloqueado en el modo o
+el estado actual.
+Viaja junto con el eco; un rechazado no se reintenta.
+_Evitar_: fallido, perdido
+
+**Sin eco**:
+Un telecomando que no apareció en el eco después de tres intentos; en
+pantalla, *NO ACK*.
+_Evitar_: sin confirmación (eso es otra cosa: ver comando con confirmación),
+perdido, rechazado
+
+**Consulta**:
+Un telecomando que pide un dato que no viaja en el paquete de telemetría; la
+respuesta llega en el par extra (F4).
+_Evitar_: pedido de datos, comando de diagnóstico
+
+**Par extra**:
+El lugar del paquete de telemetría donde viaja la respuesta a la última
+consulta: qué consulta responde y su valor. Se repite en cada paquete hasta la
+consulta siguiente, como el eco.
+_Evitar_: datos adicionales, campo libre
 
 **Comando con confirmación**:
 Un telecomando que la estación terrena pide confirmar antes de mandarlo, porque
@@ -31,8 +61,9 @@ pide X2 y separa nuestros paquetes de los de otros equipos.
 _Evitar_: ID de equipo, dirección, dirección de destino
 
 **Versión del formato**:
-El número que identifica qué edición de `protocolo/telemetria.toml` armó un
-paquete; no es la versión CCSDS de la cabecera.
+El número que identifica qué edición del formato armó un paquete de telemetría
+o un telecomando. La telemetría y los telecomandos llevan cada uno la suya, y
+suben por separado. No es la versión CCSDS de la cabecera.
 _Evitar_: versión del protocolo
 
 **Puente**:
@@ -63,9 +94,24 @@ _Evitar_: fallidos
 **Descartados**:
 Lo que llegó del puente y no se pudo decodificar: línea mal formada, CRC
 inválido o versión del formato desconocida. Va al log crudo. Un paquete de
-otro largo, de otro APID o con el tipo TC no es descartado sino ajeno: va
-sólo al log.
+otro largo, de otro APID o con el tipo TC no es descartado sino ajeno.
 _Evitar_: corruptos, rechazados, perdidos
+
+**Ajenos**:
+Lo que llegó del puente y no es nuestro: otro largo, otro APID o el tipo TC.
+Va al log crudo y tiene su propio conteo, que no se mezcla con recibidos,
+perdidos ni descartados: muestra que la estación filtra a los otros equipos.
+_Evitar_: descartados, extraños, ruido
+
+**Transmitidos**:
+Los paquetes que el CanSat transmitió desde el primero que recibió la
+estación, según el contador de secuencia: los recibidos más los perdidos.
+_Evitar_: enviados, contador de transmitidos
+
+**Enlace perdido**:
+La estación terrena lleva más de 3 s sin un recibido. Un perdido suelto no
+alcanza: el enlace sigue activo.
+_Evitar_: sin señal, desconectado
 
 ## Software de vuelo
 
@@ -75,13 +121,45 @@ _Evitar_: firmware de vuelo, código de a bordo
 
 **Estado de la FSW**:
 La fase de la misión en la que el software de vuelo dice estar; viaja en cada
-paquete de telemetría (G8). Son siete: BOOT, STANDBY, ASCENT, DESCENT 1,
-DESCENT 2, LANDED y POWER OFF. En el paquete viajan como un número del 0 al 5
+paquete de telemetría (G8). Son siete: BOOT, STANDBY, ASCENT, DESCENT_1,
+DESCENT_2, LANDED y POWER OFF. En el paquete viajan como un número del 0 al 5
 en ese orden; POWER OFF no tiene código porque no transmite, y 255 es "sin
 dato".
 _Evitar_: modo, fase de vuelo, estado del CanSat
 
+**Comienzo de misión**:
+El instante en que el CanSat se separa del cohete (X3); coincide con el paso
+de ASCENT a DESCENT_1.
+_Evitar_: despegue, lanzamiento, arranque
+
+**Tiempo de misión**:
+Los segundos transcurridos desde el comienzo de misión; sobrevive a reinicios
+y cortes de energía (F2). Antes del comienzo de misión no hay tiempo de
+misión.
+_Evitar_: cronómetro, hora de misión
+
+**Altitud**:
+La altura respecto de la rampa, calculada a bordo a partir de la presión y de
+la presión de referencia que fija la calibración de altitud cero (G1). Es la
+misma que usa la FSW para decidir el segundo descenso (C4).
+_Evitar_: altura, altitud GPS
+
+**Segundo descenso**:
+El sistema que la FSW libera al llegar al 80 % de la altitud máxima (C4), con
+un servo. Tiene su propio estado: NOT_ARMED, ARMED o TRIGGERED. No es el
+estado DESCENT_2 de la FSW: el CanSat puede estar en DESCENT_1 con el segundo
+descenso ARMED.
+_Evitar_: descenso 2 (a secas), paracaídas secundario
+
 ## Simulación
+
+**Modo**:
+De dónde salen los datos del CanSat; viaja en cada paquete. Son cuatro:
+FLIGHT (vuelo real, todos los sensores), SIM_PRESSURE (la presión llega desde
+tierra y el resto de los sensores son reales), SIM_FULL (todos los sensores
+simulados) y MANUAL (prueba de banco; el firmware de vuelo nunca lo manda). No
+es el estado de la FSW: todos los modos recorren los mismos estados.
+_Evitar_: estado, modo de vuelo
 
 **Vuelo de demostración**:
 Un vuelo simulado fijo, idéntico en cada corrida, con instantes con nombre

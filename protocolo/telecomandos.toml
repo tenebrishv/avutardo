@@ -1,0 +1,255 @@
+# ============================================================================
+#  Formato de los telecomandos del CanSat Avutardo — versión 1 (issue #11).
+#
+#  Única fuente del formato de subida: la estación terrena arma los
+#  telecomandos con él y la FSW de la Pico los valida con él. Un comando se
+#  cambia acá, nunca en el código.
+#
+#  Telecomando de 14 B, big-endian:
+#
+#    bytes  0–5   cabecera primaria CCSDS 133.0-B-2, sin cabecera secundaria,
+#                 flags de secuencia 11, el APID de telemetria.toml y el tipo
+#                 TC; su contador de 14 bits es el número de telecomando
+#    byte   6     versión del formato (`version`, abajo)
+#    byte   7     código del comando: su posición en este archivo, desde 0
+#    bytes  8–11  parámetro, int32
+#    bytes 12–13  CRC-16/CCITT-FALSE sobre los bytes 0–11
+#
+#  A SF9, BW 125 kHz, CR 4/5 y preámbulo 12, tarda 181 ms en el aire.
+#
+#  Confirmación (ADR 0003): sin ACK aparte. Cada paquete de telemetría lleva el
+#  eco (eco_id, eco_codigo, resultado_comando) del último telecomando que
+#  llegó. La estación manda de a uno, justo después de recibir un paquete (o
+#  en el momento, con el enlace perdido); si a los 3 s no lo ve en el eco,
+#  reintenta con el mismo número, y después de 3 intentos lo marca sin eco
+#  (NO ACK). A bordo, un número repetido se confirma sin volver a ejecutarse.
+#  Un rechazado no se reintenta.
+#
+#  CX OFF: después sale un último paquete con su eco y después silencio. Con
+#  la telemetría cortada, los telecomandos se ejecutan pero ninguno puede
+#  mostrar su eco, así que la estación los marca sin eco; CX ON se confirma
+#  con el primer paquete que vuelve.
+#
+#  Se rechaza (REJECTED) un telecomando con:
+#  - otra versión del formato o un código que no está en este archivo;
+#  - un parámetro fuera de rango: un código que no está en `valores`, un
+#    número fuera de [minimo, maximo], o distinto de 0 en un comando sin
+#    parámetro;
+#  - el estado de la FSW fuera de `solo_en_estado`, o el modo fuera de
+#    `solo_en_modo`.
+#
+#  Consultas (F4): responden por el par extra de la telemetría. extra_id lleva
+#  el código de la consulta y extra_valor la respuesta; el par se repite en
+#  cada paquete hasta la consulta siguiente, y antes de la primera lleva los
+#  centinelas.
+#
+#  Reglas:
+#  - El código 255 es el centinela de eco_codigo y de extra_id: ningún comando
+#    lo usa.
+#  - Desde el primer telecomando real, los comandos nuevos van siempre AL FINAL
+#    y la versión sube en 1. La versión es independiente de la de la
+#    telemetría.
+#  - RESET_MISSION no borra el último número de telecomando: la numeración es
+#    de la estación terrena, que la sigue desde su registro.
+# ============================================================================
+
+version = 1
+
+[enlace]
+codificacion = "binario"
+crc = "CRC-16/CCITT-FALSE"
+largo = 14
+
+# Cada [[comando]] lleva:
+#   nombre          lo que se ve en la estación terrena y en el CSV
+#   grupo           comunicaciones | hora | calibracion | simulacion |
+#                   descenso | camaras | consultas | mision
+#   requisito       código del Anexo A v2 que lo pide; vacío si lo eligió el
+#                   equipo
+#   descripcion
+# y, opcionales:
+#   valores         nombres de los códigos 0, 1, 2… del parámetro
+#   unidad          parámetro numérico, en esa unidad SI (entero)
+#   minimo, maximo  rango del parámetro numérico, inclusive
+#   confirmar       comando con confirmación: true, o la lista de valores que
+#                   la piden
+#   solo_en_estado  estados de la FSW (estado_fsw) en que se acepta
+#   solo_en_modo    modos (modo) en que se acepta
+#   respuesta       sólo las consultas: qué lleva extra_valor
+#                     forma = "entero"   un número, en `unidad`
+#                     forma = "bits"     bit 0, 1, 2… = `bits`; 1 = sí
+#                     forma = "valores"  códigos 0, 1, 2… = `valores`
+#                     forma = "mitades"  16 bits altos = `alto`, 16 bajos =
+#                                        `bajo`, cada uno uint16 con divisor
+# Sin `valores` ni `unidad`, el comando no lleva parámetro (va en 0).
+
+# --- Comunicaciones ----------------------------------------------------------
+
+[[comando]]
+nombre = "CX"
+grupo = "comunicaciones"
+requisito = ""
+valores = ["ON", "OFF"]
+confirmar = ["OFF"]
+descripcion = "Reanuda o corta la telemetría; cortada, la Heltec sigue escuchando telecomandos"
+
+[[comando]]
+nombre = "TX_POWER"
+grupo = "comunicaciones"
+requisito = ""
+unidad = "dBm"
+minimo = 2
+maximo = 28
+descripcion = "Potencia de transmisión de la Heltec de a bordo"
+
+# --- Hora --------------------------------------------------------------------
+
+[[comando]]
+nombre = "TIME_SET"
+grupo = "hora"
+requisito = "F3"
+unidad = "s"
+descripcion = "Fija la hora UTC del RTC, en segundos Unix, desde el reloj de la notebook"
+
+[[comando]]
+nombre = "TIME_SYNC"
+grupo = "hora"
+requisito = ""
+descripcion = "Respaldo de TIME_SET: fija la hora del RTC con la del GPS"
+
+# --- Calibración -------------------------------------------------------------
+
+[[comando]]
+nombre = "CAL_ALT"
+grupo = "calibracion"
+requisito = "G1"
+confirmar = true
+solo_en_estado = ["STANDBY"]
+descripcion = "Altitud cero: fija la presión de referencia P0, que persiste a través de reinicios (F5)"
+
+[[comando]]
+nombre = "CAL_IMU"
+grupo = "calibracion"
+requisito = ""
+solo_en_estado = ["STANDBY"]
+descripcion = "Mide los sesgos del giróscopo y del acelerómetro, con el CanSat quieto en la rampa"
+
+# --- Simulación --------------------------------------------------------------
+
+[[comando]]
+nombre = "SIM"
+grupo = "simulacion"
+requisito = ""
+valores = ["OFF", "PRESSURE", "FULL"]
+confirmar = ["OFF", "PRESSURE", "FULL"]
+solo_en_estado = ["STANDBY"]
+descripcion = "Cambia el modo: OFF = FLIGHT, PRESSURE = SIM_PRESSURE, FULL = SIM_FULL"
+
+[[comando]]
+nombre = "SIMP"
+grupo = "simulacion"
+requisito = ""
+unidad = "Pa"
+solo_en_modo = ["SIM_PRESSURE"]
+descripcion = "Presión simulada que la FSW usa en lugar de la del BME280"
+
+# --- Descenso ----------------------------------------------------------------
+
+[[comando]]
+nombre = "SERVO"
+grupo = "descenso"
+requisito = ""
+valores = ["MIN", "CENTER", "MAX"]
+solo_en_estado = ["STANDBY"]
+descripcion = "Sólo pruebas: mueve el servo de liberación y la FSW corta el PWM después"
+
+[[comando]]
+nombre = "DESCENT2"
+grupo = "descenso"
+requisito = "C4"
+valores = ["ARM", "DISARM"]
+confirmar = ["DISARM"]
+descripcion = "Habilita o inhibe la liberación del segundo descenso al 80 % de la altitud máxima"
+
+# --- Cámaras -----------------------------------------------------------------
+
+[[comando]]
+nombre = "CAM1"
+grupo = "camaras"
+requisito = ""
+valores = ["START", "STOP", "RESTART"]
+descripcion = "Anulación manual de la cámara 1: la FSW la arranca sola en el comienzo de misión"
+
+[[comando]]
+nombre = "CAM2"
+grupo = "camaras"
+requisito = ""
+valores = ["START", "STOP", "RESTART"]
+descripcion = "Anulación manual de la cámara 2: la FSW la arranca sola en el comienzo de misión"
+
+# --- Consultas (F4) ----------------------------------------------------------
+
+[[comando]]
+nombre = "CAM_STATUS"
+grupo = "consultas"
+requisito = "F4"
+descripcion = "Estado de las dos cámaras"
+[comando.respuesta]
+forma = "bits"
+bits = ["cam1_grabando", "cam1_sd_con_lugar", "cam2_grabando", "cam2_sd_con_lugar"]
+
+[[comando]]
+nombre = "GET_SENSORS"
+grupo = "consultas"
+requisito = "F4"
+descripcion = "Qué sensores responden, en el orden en que aparecen en la telemetría"
+[comando.respuesta]
+forma = "bits"
+bits = ["ds3231", "bme280", "ina3221", "gps_l76k", "lsm6dso32"]
+
+[[comando]]
+nombre = "TIME_STATUS"
+grupo = "consultas"
+requisito = "F4"
+descripcion = "De dónde salió la hora del RTC; vuelve a SIN_HORA si el RTC la pierde"
+[comando.respuesta]
+forma = "valores"
+valores = ["SIN_HORA", "TIME_SET", "TIME_SYNC"]
+
+[[comando]]
+nombre = "GET_P0"
+grupo = "consultas"
+requisito = "F4"
+descripcion = "Presión de referencia P0 de la última altitud cero"
+[comando.respuesta]
+forma = "entero"
+unidad = "Pa"
+
+[[comando]]
+nombre = "GET_RESETS"
+grupo = "consultas"
+requisito = "F4"
+descripcion = "Reinicios de la Pico en la misión; los borra RESET_MISSION"
+[comando.respuesta]
+forma = "entero"
+unidad = ""
+
+[[comando]]
+nombre = "GET_BAT"
+grupo = "consultas"
+requisito = "X6 F4"
+descripcion = "Tensión de la batería y del panel solar, como pide X6 (también viajan en cada paquete)"
+[comando.respuesta]
+forma = "mitades"
+alto = { nombre = "tension_bateria", unidad = "V", divisor = 1000 }
+bajo = { nombre = "tension_panel", unidad = "V", divisor = 1000 }
+
+# --- Misión ------------------------------------------------------------------
+
+[[comando]]
+nombre = "RESET_MISSION"
+grupo = "mision"
+requisito = ""
+confirmar = true
+solo_en_estado = ["STANDBY"]
+descripcion = "Borra el comienzo de misión, el contador de secuencia y los reinicios"

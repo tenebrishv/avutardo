@@ -11,7 +11,7 @@ Acá viven el software de vuelo, el firmware del enlace de radio y de las
 cámaras, la estación terrena y el formato de telemetría que los une.
 
 > **Estado:** el proyecto está en la etapa de la PDR (revisión preliminar de
-> diseño). El repo tiene la estructura, el CI y la versión 1 del formato
+> diseño). El repo tiene la estructura, el CI y la versión 2 del formato
 > de telemetría; el código de cada parte se escribe a partir de ahora. La tabla de
 > [Estado](#estado) dice qué hay y qué falta en cada carpeta.
 
@@ -59,8 +59,9 @@ flowchart LR
   telecomandos.
 
 El formato de los paquetes está escrito una sola vez, en
-[`protocolo/telemetria.toml`](protocolo/telemetria.toml): la estación terrena lo
-lee al arrancar y, cuando exista la FSW, un script va a generar el encabezado C
+[`protocolo/telemetria.toml`](protocolo/telemetria.toml) y
+[`protocolo/telecomandos.toml`](protocolo/telecomandos.toml): la estación
+terrena los lee al arrancar y, cuando exista la FSW, un script va a generar el encabezado C
 de la Pico desde ahí.
 
 ## Estado
@@ -68,7 +69,7 @@ de la Pico desde ahí.
 | Carpeta | Qué es | Estado |
 |---|---|---|
 | [`gcs/`](gcs/) | Estación terrena (Python, PySide6 y pyqtgraph) | **Esqueleto:** estructura, dependencias y CI. Todavía no hace nada útil. |
-| [`protocolo/`](protocolo/) | Formato de telemetría, compartido por todo lo demás | **Versión 1:** paquete binario de 61 B con cabecera CCSDS y CRC-16, 21 campos. Faltan los telecomandos (#11). |
+| [`protocolo/`](protocolo/) | Formato de telemetría y de telecomandos, compartido por todo lo demás | **Versión 2:** paquete binario de 75 B con cabecera CCSDS y CRC-16, 32 campos agrupados por bloque, cada uno con su etiqueta en inglés. Telecomandos, **versión 1** (#11): 14 B binarios con la misma cabecera, 19 comandos; las consultas responden por el par extra de la telemetría. `vista_formato.py` (#16) genera las tablas de campos y un paquete de ejemplo en ASCII y en binario, en Markdown y CSV, para la PDR. |
 | [`firmware/pico/`](firmware/pico/) | Software de vuelo de la Raspberry Pi Pico 2 | Sin código |
 | [`firmware/heltec/`](firmware/heltec/) | Enlace LoRa, a bordo y en tierra | Sin código |
 | [`firmware/camaras/`](firmware/camaras/) | Cámaras ESP32-S3-CAM N16R8 con OV5640 | Sin código |

@@ -19,7 +19,7 @@ El GPS tiene que llegar a la Pico igual, lo arme quien lo arme:
 - **F3**: la calibración pone en hora el DS3231 con el GPS, y el DS3231
   cuelga de la Pico.
 - Pasar el GPS a una lectura cada 10 s por debajo de 6.4 V lo decide quien
-  mide la batería, y el INA226 está en la Pico.
+  mide la batería, y el INA3221 (antes figuraba como INA226) está en la Pico.
 - **F1 y F2**: el contador de secuencia y el tiempo de misión se guardan en
   la flash de la Pico, así que la cabecera también es suya.
 
