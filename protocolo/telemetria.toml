@@ -326,7 +326,7 @@ etiqueta = "CMD_ECHO"
 tipo = "uint8"
 unidad = ""
 requisito = "G15"
-descripcion = "Eco: código del último telecomando que llegó; los códigos los define la #11"
+descripcion = "Eco: código del último telecomando que llegó (protocolo/telecomandos.toml)"
 
 [[campo]]
 nombre = "resultado_comando"
@@ -343,8 +343,7 @@ etiqueta = "EXTRA_ID"
 tipo = "uint8"
 unidad = ""
 requisito = "F4"
-reservado = true
-descripcion = "Qué dato adicional lleva extra_valor; lo define la #11"
+descripcion = "Par extra: código de la consulta que responde extra_valor (protocolo/telecomandos.toml)"
 
 [[campo]]
 nombre = "extra_valor"
@@ -352,5 +351,4 @@ etiqueta = "EXTRA_VALUE"
 tipo = "int32"
 unidad = ""
 requisito = "F4"
-reservado = true
-descripcion = "Dato adicional pedido por telecomando; lo define la #11"
+descripcion = "Par extra: respuesta a la última consulta; se repite hasta la siguiente"

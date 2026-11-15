@@ -12,6 +12,7 @@ del Anexo A v2 del certamen.
 | Repo | Uno solo para todo el código del CanSat | El formato de telemetría es compartido y vive en un solo lugar |
 | Formato | `protocolo/telemetria.toml` como única fuente; la GCS lo lee al arrancar y un script genera el `telemetria.h` de la Pico | Un cambio de campo se hace en un archivo, sin tocar código |
 | Paquete (versión 2, #10) | 75 B binarios, big-endian: cabecera primaria CCSDS 133.0-B-2 (APID 106, contador de 14 bits = F1), 1 B de versión del formato, 66 B de campos enteros con divisor, agrupados por bloque (operación, ambiental, energía, navegación, inercial, descenso, enlace y telecomandos), y CRC-16/CCITT-FALSE. Un solo paquete a 1 Hz; sin dato = centinela del tipo. La versión 1 nunca salió del simulador, así que la 2 reordena; desde el primer paquete real, campos nuevos al final y sube la versión | A SF9 tarda 447 ms y deja lugar para un telecomando en el mismo segundo (ADR 0003); el APID separa nuestros paquetes de los de otros equipos (X2) |
+| Telecomandos (versión 1, #11) | `protocolo/telecomandos.toml`, aparte de la telemetría. 14 B binarios, big-endian: cabecera CCSDS con el APID de la telemetría y el tipo TC (su contador es el número de telecomando), 1 B de versión propia, 1 B de código (la posición en el `.toml`, desde 0), parámetro int32 y CRC-16/CCITT-FALSE. 19 comandos. Se rechaza otra versión, un código desconocido, un parámetro fuera de rango (los sin parámetro van en 0) o un estado o modo fuera de `solo_en_estado`/`solo_en_modo`. Las consultas (F4) responden por el par extra (`extra_id` = código), que se repite hasta la consulta siguiente | A SF9 tarda 181 ms y entra en el segundo junto con el paquete de 75 B; la confirmación es el eco (ADR 0003) y el par extra hereda su lógica: un paquete perdido no se lleva la respuesta |
 | Clasificación de cada línea del puente | En orden: forma inválida → descartado; largo ≠ 75 → ajeno; CRC inválido → descartado; otro APID o tipo TC → ajeno; versión desconocida → descartado; si no, recibido. Todo va al log crudo | Recibidos, perdidos y descartados en pantalla (G14, F1); lo ajeno no ensucia los conteos |
 | Perdidos | `(actual − anterior − 1) mod 16384`; un salto hacia adelante de más de 8 000 es un contador reiniciado, sin perdidos; contador repetido con datos distintos se acepta y se marca, idéntico se ignora | La vuelta de 16 383 a 0 no cuenta como pérdida |
 | Módulos | Fuente → Decodificador → Estado de misión → GUI y Registro | Sólo el decodificador conoce el formato; el estado se testea sin Qt |
@@ -50,9 +51,5 @@ del Anexo A v2 del certamen.
   si aparece algo que valga la pena mostrar sólo en pantalla grande.
 - **Zoom de letra** (Ctrl+ y Ctrl−, con piso en 14 pt): se reabre si en un
   ensayo a pleno sol los 14 pt no alcanzan.
-- **Formato de los telecomandos, sus códigos y el par extra:** #11. Los
-  campos del eco (`eco_id`, `eco_codigo`, `resultado_comando`) ya están en el
-  formato y no son `reservado`; `extra_id` y `extra_valor` tienen su lugar en
-  el paquete, pero son `reservado` hasta que la #11 los defina.
 - **Si las dos Heltec comparten firmware.** La línea del puente ya está fijada:
   `<hex>,<rssi>,<snr>`.

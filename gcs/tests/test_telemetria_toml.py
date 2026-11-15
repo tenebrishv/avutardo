@@ -188,9 +188,9 @@ def test_mostrar_acordado(campos):
 
 
 def test_reservados_acordados(campos):
-    # El par extra lo define la #11: hasta entonces no se muestra ni va al CSV.
+    # El par extra dejó de ser reservado con la #11: se muestra y va al CSV (F4).
     reservados = [c["nombre"] for c in campos if c.get("reservado")]
-    assert reservados == ["extra_id", "extra_valor"]
+    assert reservados == []
 
 
 def test_requisitos_acordados(campos):
