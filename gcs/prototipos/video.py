@@ -46,6 +46,8 @@ SUBTITULOS = {
     56: "La consola muestra cada paquete crudo: acá llega uno con el CRC roto (Discarded).",
     72: "DESCENT_2: DESCENT2_STATUS pasa a TRIGGERED y la velocidad de bajada se compara con C4.",
     100: "El enlace: RSSI, SNR, piso de ruido estimado y PER, todo calculado en la notebook.",
+    140: "Tema light por defecto (G12). En la prueba al sol del 2026-11-16 "
+    "se leyó mejor high contrast: se elige desde el pie.",
     176: "LANDED: el QR lleva la última posición a Google Maps para ir a buscarlo.",
 }
 
