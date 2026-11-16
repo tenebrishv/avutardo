@@ -60,12 +60,31 @@ conteos salen de la franja (cada dato una vez) y el pie sólo avisa LINK LOST.
     de alto aun con el Recorrido aplastado; L2 entra con 2 px y se pasa del
     ancho cuando los conteos llegan a cuatro cifras.
 
+Ronda 7 (#22): la consola de depuración, sobre L3. Fina, abajo de todo, entre
+la grilla y el pie; arranca oculta y un botón la muestra. Muestra cada línea
+del puente tal cual (`<hex>,<rssi>,<snr>`, los bytes reales de la v2 armados
+con `protocolo/vista_formato.py`: cabecera en azul, CRC en ocre), los CRC
+rotos, los ajenos, los huecos del contador, los telecomandos que salen (TX,
+14 B) y el texto de la Heltec de tierra (de juguete: su formato no está
+definido). A 14 pt cada paquete ocupa dos líneas.
+
+    K3   3 líneas, el botón en el pie
+    K6   6 líneas, el botón en el pie
+    K6F  6 líneas, el botón en la franja de arriba
+
+    Elegida: K6 (2026-11-16). Seis líneas cuentan un CRC roto entero (el
+    paquete descartado, el hueco del contador y el siguiente) y el botón en el
+    pie no le quita ancho a la franja. K3 muestra poco más de un paquete. Con
+    la consola abierta, los gráficos bajan su mínimo de 140 a 100 px: si no,
+    la ventana pide 790 px de alto.
+
 Correr, desde `gcs/`:
 
     uv run python prototipos/pantalla.py        # arranca en G2B, la elegida
     uv run python prototipos/pantalla.py A      # arranca en A
     uv run python prototipos/pantalla.py G2A    # la ronda 5 (#23)
     uv run python prototipos/pantalla.py L1     # la ronda 6 (#24)
+    uv run python prototipos/pantalla.py K6     # la ronda 7 (#22)
 
 Teclas: ← y → cambian de variante, F11 alterna pantalla completa, F12 guarda
 una captura al doble de píxeles en `prototipos/capturas/` (como pide #4, Q6).
@@ -97,6 +116,7 @@ corrida, con los instantes `standby`, `descenso` y `aterrizado`.
 
     uv run python prototipos/pantalla.py --simular demo --hasta descenso
     uv run --with segno python prototipos/pantalla.py --captura salida.png --hasta aterrizado
+    uv run python prototipos/pantalla.py K6 --captura salida.png --hasta consola
 
 --captura corre fuera de pantalla (1366×768 lógicos con escala 2, según
 `pantalla-captura.json`), graba el PNG a 2732×1536 y sale; en `standby` graba
@@ -121,7 +141,16 @@ from pathlib import Path
 
 import pyqtgraph as pg
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QImage, QKeySequence, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QImage,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+    QTextOption,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -138,6 +167,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -165,7 +195,14 @@ ETIQUETA = {c["nombre"]: c["etiqueta"] for c in CAMPOS}
 # del texto en pantalla, así que van sin corchetes.
 SIN_CORCHETES = {c["nombre"] for c in CAMPOS if c.get("mostrar")}
 with TOML_TC.open("rb") as f:
-    COMANDOS = {c["nombre"]: c for c in tomllib.load(f)["comando"]}
+    FORMATO_TC = tomllib.load(f)
+COMANDOS = {c["nombre"]: c for c in FORMATO_TC["comando"]}
+CODIGO_TC = {c["nombre"]: i for i, c in enumerate(FORMATO_TC["comando"])}
+
+# El codificador de la vista del formato (#16): los bytes reales de la v2, con
+# cabecera CCSDS y CRC, para la consola de depuración (#22).
+sys.path.insert(0, str(RAIZ / "protocolo"))
+import vista_formato as vf  # noqa: E402
 
 # Lo que cuenta o calcula la GCS, que no es un campo del formato: inglés común,
 # nunca una etiqueta inventada en mayúsculas (#25). Los conteos, con la forma en
@@ -221,6 +258,37 @@ def con_unidad(nombre: str) -> str:
     return ETIQUETA[nombre]
 
 
+# --- bytes del paquete (#22) ---------------------------------------------
+
+
+def codigo_tc(nombre: str) -> int | None:
+    """El código de telecomando que viaja en el eco; sin eco, el centinela."""
+    if not nombre:
+        return None
+    return CODIGO_TC.get(nombre, 200)  # «?X»: un código que el .toml no tiene
+
+
+def bytes_paquete(p: dict, hora: datetime) -> bytes:
+    """Los 75 B del paquete que armaría la FSW con los valores del simulador."""
+    valores = {}
+    for c in CAMPOS:
+        v = p[c["nombre"]]
+        sin_dato = v == "" or (isinstance(v, float) and math.isnan(v))
+        valores[c["nombre"]] = None if sin_dato else v
+    valores["hora"] = hora.isoformat()
+    valores["eco_codigo"] = codigo_tc(p["eco_codigo"])
+    valores["extra_id"] = codigo_tc(p["extra_id"])
+    return vf.codificar_telemetria(FORMATO, p["contador"] % 2**14, valores)
+
+
+def bytes_ajeno(numero: int, largo: int) -> bytes:
+    """Un paquete de otro equipo: cabecera CCSDS con otro APID y bytes al azar
+    (con su propia semilla, para no mover el vuelo de demostración)."""
+    azar = random.Random(numero)
+    cabecera = vf.cabecera_ccsds(vf.TM, 0x2B1, numero % 2**14, largo)
+    return cabecera + bytes(azar.randrange(256) for _ in range(largo - 6))
+
+
 # --- simulador de juguete -------------------------------------------------
 
 # Vuelo de demostración (#8, "Vuelo de demostración" en docs/gcs-decisiones.md):
@@ -235,7 +303,7 @@ GUION_DEMO = {  # segundo de la notebook → telecomando, mandado en STANDBY
 # Segundos desde el despegue → falla. El descartado también deja un hueco, así
 # que es el perdido del descenso: 3 perdidos y 1 descartado hasta `descenso`.
 FALLAS_DEMO = {4: "perdido", 5: "perdido", 30: "crc", 100: "perdido"}
-INSTANTES = ("standby", "descenso", "aterrizado")
+INSTANTES = ("standby", "descenso", "aterrizado", "consola")
 
 
 def llego(sim: Simulador, instante: str) -> bool:
@@ -244,6 +312,8 @@ def llego(sim: Simulador, instante: str) -> bool:
         return sim.reloj >= 20
     if instante == "descenso":
         return sim.t - sim.despegue >= EYECCION + 40
+    if instante == "consola":  # #22: justo después del paquete con el CRC roto
+        return sim.t - sim.despegue >= 31
     return sim.t_aterrizaje is not None and sim.t - sim.t_aterrizaje >= 10
 
 
@@ -292,6 +362,11 @@ class Simulador:
         self.senal_debil = False  # #24: SNR negativa, para ver el noise floor
         self.ultimo: dict = {}
         self.registro: deque[str] = deque(maxlen=200)
+        # #22: lo que muestra la consola de depuración, (hora UTC, tipo, texto).
+        self.consola: deque[tuple[str, str, str]] = deque(maxlen=60)
+        # Texto de juguete: el formato de la salida de texto de la Heltec de
+        # tierra todavía no está definido.
+        self.anotar("heltec", "ground bridge ready")
         # Fallas que se disparan con el teclado (ver el encabezado).
         self.descartados = 0
         self.rafaga = 0  # paquetes que quedan por perder
@@ -331,9 +406,9 @@ class Simulador:
         # un paquete de otro largo. Los ajenos no tocan los otros conteos.
         tl = self.reloj - self.despegue
         if tl >= 0 and tl % 4 == 0:
-            self.ajenos += 1
+            self.ajeno()
         if tl == 21:
-            self.ajenos += 1
+            self.ajeno(48)
         if self.cortado:
             return
         if self.reinicio > 0:
@@ -419,11 +494,19 @@ class Simulador:
         if self.crc_roto > 0:  # llega, pero no se decodifica: descartado y hueco
             self.crc_roto -= 1
             self.descartados += 1
+            roto = bytearray(bytes_paquete(p, self.hora()))
+            roto[40] ^= 0x10  # un bit cambiado en el aire
+            self.anotar("crc", self.linea_puente(bytes(roto), self.rssi, self.snr))
             return
         if self.enlace_caido or (self.azar.random() < self.p_perdida and self.contador > 3):
             return  # paquete perdido en el aire
         if self.ultimo_contador is not None:
-            self.perdidos += self.contador - self.ultimo_contador - 1
+            hueco = self.contador - self.ultimo_contador - 1
+            self.perdidos += hueco
+            if hueco > 0:
+                a, b = self.ultimo_contador + 1, self.contador - 1
+                rango = f"{a}" if a == b else f"{a}–{b}"
+                self.anotar("lost", f"{hueco} lost: sequence count {rango}")
         self.ultimo_contador = self.contador
         self.recibidos += 1
         self.ultimo_rx = self.reloj
@@ -448,6 +531,27 @@ class Simulador:
             self.rssi = -68 - alt / 25 + r(0, 1.5)
             self.snr = 10 - alt / 120 + r(0, 0.5)
         self.registro.append(",".join(fmt(c["nombre"], p[c["nombre"]]) for c in CAMPOS))
+        self.anotar("rx", self.linea_puente(bytes_paquete(p, self.hora()), self.rssi, self.snr))
+
+    # --- consola de depuración (#22) ---
+
+    def anotar(self, tipo: str, texto: str) -> None:
+        """Una línea de la consola, con la hora UTC de la notebook."""
+        hora = HORA_DEMO + timedelta(seconds=self.reloj) if self.demo else datetime.now(UTC)
+        self.consola.append((hora.strftime("%H:%M:%S"), tipo, texto))
+
+    @staticmethod
+    def linea_puente(datos: bytes, rssi: float, snr: float) -> str:
+        """Lo que manda la Heltec de tierra por USB: `linea_puente` del .toml."""
+        rssi_txt = "nan" if math.isnan(rssi) else f"{rssi:.1f}"
+        snr_txt = "nan" if math.isnan(snr) else f"{snr:.1f}"
+        return f"{datos.hex().upper()},{rssi_txt},{snr_txt}"
+
+    def ajeno(self, largo: int = 75) -> None:
+        """#24: llega un paquete de otro equipo (otro APID u otro largo)."""
+        self.ajenos += 1
+        datos = bytes_ajeno(self.ajenos, largo)
+        self.anotar("foreign", self.linea_puente(datos, -97.0, 2.5))
 
     def _energia(self, estado: str, rot_z: float) -> dict:
         """Los seis campos del INA3221 (#23). Corriente positiva = consumo.
@@ -520,6 +624,13 @@ class Simulador:
         estado = self.ultimo.get("estado_fsw", "STANDBY")
         aceptado = comando is not None and estado in comando.get("solo_en_estado", [estado])
         self.eco_id += 1
+        try:
+            definicion = COMANDOS[nombre]
+            parametro = argumento.upper() if "valores" in definicion else int(argumento or 0)
+            tc = vf.codificar_telecomando(FORMATO, FORMATO_TC, self.eco_id, nombre, parametro)
+            self.anotar("tx", f"{tc.hex().upper()}  {nombre} {argumento}".rstrip())
+        except (KeyError, ValueError):
+            self.anotar("tx", f"{nombre} {argumento}  (not encodable)".rstrip())
         self.eco_codigo = nombre if comando else f"?{nombre}"
         self.resultado_comando = "ACCEPTED" if aceptado else "REJECTED"
         if not aceptado:
@@ -2333,6 +2444,128 @@ class VarianteL3(VarianteEnlace):
         columna.addWidget(self.t["recorrido"], 1)
 
 
+# --- ronda 7 (#22): la consola de depuración ------------------------------
+
+# Una línea del puente son 150 hex más el RSSI y el SNR: a 14 pt (G12) entran
+# unos 120 caracteres a lo ancho, así que cada paquete ocupa dos líneas.
+ETIQUETA_CONSOLA = {
+    "rx": ("RX", "#145a32"),
+    "crc": ("BAD CRC", "#b03a2e"),
+    "lost": ("LOST", "#b03a2e"),
+    "foreign": ("FOREIGN", "#8a5a0b"),
+    "tx": ("TX", "#1f4e9c"),
+    "heltec": ("HELTEC", "#666"),
+}
+
+
+def html_linea(hora: str, tipo: str, texto: str) -> str:
+    """Una entrada: hora, qué es y la línea tal cual; en un paquete, la cabecera
+    CCSDS en azul y el CRC en ocre, para que se vea cómo baja el binario."""
+    etiqueta, color = ETIQUETA_CONSOLA[tipo]
+    if tipo in ("rx", "crc") and "," in texto:
+        hexa, resto = texto.split(",", 1)
+        cuerpo = (
+            f"<span style='color:#1f4e9c'>{hexa[:12]}</span>"
+            f"<span style='color:#666'>{hexa[12:14]}</span>"
+            f"{hexa[14:-4]}"
+            f"<span style='color:#b9770e; font-weight:bold'>{hexa[-4:]}</span>"
+            f"<span style='color:#666'>,{resto}</span>"
+        )
+    elif tipo == "foreign":
+        cuerpo = f"<span style='color:#666'>{texto}</span>"
+    else:
+        cuerpo = texto
+    marca = f"<b style='color:{color}'>{etiqueta.ljust(7).replace(' ', '&nbsp;')}</b>"
+    return (
+        f"<p style='margin:0'><span style='color:#555'>{hora}</span>&nbsp;{marca}&nbsp;{cuerpo}</p>"
+    )
+
+
+class Consola(QTextEdit):
+    """Abajo de todo, fina: las líneas del puente en hex y el texto de la Heltec."""
+
+    def __init__(self, lineas: int) -> None:
+        super().__init__()
+        self.setReadOnly(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        fuente = QFont("Consolas")
+        fuente.setStyleHint(QFont.StyleHint.Monospace)
+        fuente.setPointSize(PT)
+        self.setFont(fuente)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        self.document().setDocumentMargin(2)
+        self.setStyleSheet("QTextEdit { border: 2px solid #999; background: #fafafa; }")
+        alto = lineas * QFontMetrics(fuente).lineSpacing() + 4 + 2 * self.frameWidth()
+        self.setFixedHeight(alto)
+        self.visto = None
+
+    def actualizar(self, sim: Simulador) -> None:
+        ultimo = sim.consola[-1] if sim.consola else None
+        if ultimo is self.visto:
+            return
+        self.visto = ultimo
+        self.setHtml("".join(html_linea(*e) for e in list(sim.consola)[-30:]))
+        barra = self.verticalScrollBar()
+        barra.setValue(barra.maximum())
+
+
+class VarianteConsola(VarianteL3):
+    """L3 con la consola entre la grilla y el pie; arranca oculta."""
+
+    lineas = 6
+    boton_en = "pie"
+
+    def __init__(self, sim: Simulador) -> None:
+        super().__init__(sim)
+        self.consola = Consola(self.lineas)
+        self.consola.hide()
+        raiz = self.layout()
+        raiz.insertWidget(raiz.count() - 1, self.consola)
+        if self.lineas > 3:  # 6 líneas no entran en 768 px con los 140 px de mínimo
+            for t in self.t.values():
+                for w in getattr(t, "plots", []):
+                    w.setMinimumHeight(100)
+            self.t["recorrido"].plot.setMinimumHeight(100)
+        self.boton = QPushButton()
+        self.boton.setCheckable(True)
+        self.boton.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.boton.toggled.connect(self.mostrar_consola)
+        self.mostrar_consola(False)
+        if self.boton_en == "pie":
+            self.boton.setStyleSheet("padding: 0px 8px;")
+            self.pie[0].parentWidget().layout().addWidget(self.boton)
+        else:  # en la franja, al lado de la ventana de los gráficos
+            self.boton.setMinimumHeight(48)
+            fila = self.franja.layout()
+            fila.insertWidget(fila.count() - 1, self.boton)
+
+    def mostrar_consola(self, visible: bool) -> None:
+        self.consola.setVisible(visible)
+        self.boton.setText("Console ▼" if visible else "Console ▲")
+        if visible:
+            self.consola.visto = None
+            self.consola.actualizar(self.sim)
+
+    def actualizar(self) -> None:
+        super().actualizar()
+        if self.consola.isVisible():
+            self.consola.actualizar(self.sim)
+
+
+class VarianteK3(VarianteConsola):
+    nombre = "Round 7 (#22): console, 3 lines, button in the footer"
+    lineas = 3
+
+
+class VarianteK6(VarianteConsola):
+    nombre = "Round 7 (#22): console, 6 lines, button in the footer"
+
+
+class VarianteK6F(VarianteConsola):
+    nombre = "Round 7 (#22): console, 6 lines, button in the top strip"
+    boton_en = "franja"
+
+
 # --- ventana y selector de variante ---------------------------------------
 
 VARIANTES = {
@@ -2351,6 +2584,9 @@ VARIANTES = {
     "L1": VarianteL1,
     "L2": VarianteL2,
     "L3": VarianteL3,
+    "K3": VarianteK3,
+    "K6": VarianteK6,
+    "K6F": VarianteK6F,
 }
 
 
@@ -2492,7 +2728,7 @@ class Ventana(QMainWindow):
             s.ina_sin_dato = not s.ina_sin_dato
             texto = "BAT_CURRENT with no data" if s.ina_sin_dato else "BAT_CURRENT with data"
         elif que == "ajeno":
-            s.ajenos += 1
+            s.ajeno()
             texto = "A packet from another team arrived (Foreign)"
         elif que == "debil":
             s.senal_debil = not s.senal_debil
@@ -2628,6 +2864,10 @@ def capturar_demo(app: QApplication, v: Ventana, instante: str, destino: Path) -
     v.timer.stop()
     v.resize(1366, 768)
     v.show()
+    if instante == "consola":
+        if not isinstance(v.vista, VarianteConsola):
+            sys.exit("--hasta consola needs a console variant (K3, K6 or K6F)")
+        v.vista.boton.setChecked(True)
     app.processEvents()
     avanzar(v, instante)
     v.selector.hide()
@@ -2652,6 +2892,10 @@ def capturar_demo(app: QApplication, v: Ventana, instante: str, destino: Path) -
             imagen(widget).save(str(ruta))
             grabadas.append(ruta)
         dialogo.close()
+    if instante == "consola":
+        ruta = destino.with_name(f"{destino.stem}-recorte{destino.suffix}")
+        imagen(v.vista.consola).save(str(ruta))
+        grabadas.append(ruta)
     for ruta in grabadas:
         print(f"Saved {ruta}")
 
@@ -2681,6 +2925,8 @@ def main() -> None:
     if args.captura:
         preparar_captura()
     por_defecto = "L3" if args.captura else "G2B"
+    if args.hasta == "consola":
+        por_defecto = "K6"
     inicial = (args.variante or por_defecto).upper()
     app = QApplication(sys.argv[:1])
     f = app.font()
