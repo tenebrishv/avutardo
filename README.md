@@ -29,13 +29,17 @@ nadir. Los requisitos se citan por su código del Anexo A v2 del certamen
 ```mermaid
 flowchart LR
     subgraph cansat["CanSat"]
-        sens["Sensores (I²C)<br/>presión, temperatura, IMU,<br/>tensión y corriente, reloj"]
+        i2c0["I2C0<br/>INA3221 (energía)<br/>LSM6DSO32 (IMU)"]
+        i2c1["I2C1<br/>BME280 (ambiente)<br/>DS3231 (reloj)"]
+        gps["GPS L76K"]
         pico["Raspberry Pi Pico 2<br/>software de vuelo"]
         cams["2 × ESP32-S3-CAM<br/>cenit y nadir, microSD"]
-        hb["Heltec LoRa 32 V4<br/>con GPS"]
-        sens --> pico
-        pico <-->|GPIO| cams
-        pico <-->|UART| hb
+        hb["Heltec LoRa 32 V4<br/>módem LoRa"]
+        i2c0 --> pico
+        i2c1 --> pico
+        gps -->|UART1| pico
+        pico <-->|"UART por PIO"| cams
+        pico <-->|UART0| hb
     end
     subgraph tierra["Estación terrena"]
         ht["Heltec LoRa 32 V4<br/>puente, agrega RSSI y SNR"]
@@ -47,12 +51,25 @@ flowchart LR
     hb <-.->|"LoRa 915–928 MHz"| ht
 ```
 
-- **Pico 2** (sin radio): el núcleo. Lee los sensores, decide el estado
-  del vuelo, maneja las cámaras y arma los paquetes de telemetría.
-- **Heltec a bordo:** el único transmisor del CanSat. Recibe los paquetes de la
-  Pico, les suma el GPS y los transmite en 915–928 MHz (`X1`). No guarda estado.
+- **Pico 2** (sin radio): el núcleo. Lee los sensores y el GPS, decide el estado
+  del vuelo, maneja las cámaras y el servo del segundo descenso, y arma los
+  paquetes de telemetría completos
+  ([ADR 0001](docs/adr/0001-la-pico-arma-el-paquete.md)).
+- **Sensores:** en dos buses I²C. En el I2C0, el INA3221 (tensión y corriente
+  de la batería, de la barra de 3.3 V y del panel solar) y el LSM6DSO32
+  (aceleración y rotación). En el I2C1, el BME280 (presión, temperatura y
+  humedad) y el reloj DS3231, que le da a la Pico un pulso de 1 Hz.
+- **GPS:** un Seeed Studio L76K aparte, en la UART1 de la Pico.
+- **Heltec a bordo:** el único transmisor del CanSat, sólo módem LoRa.
+  Transmite sin tocarlos los paquetes que le pasa la Pico, en 915–928 MHz
+  (`X1`), y le reenvía lo que recibe. No guarda estado; la Pico puede
+  reiniciarla.
 - **Cámaras:** el mismo programa en las dos; graban en su propia microSD cuando
-  la Pico se lo indica. El WiFi y el Bluetooth van apagados.
+  la Pico se lo indica, por una UART que la Pico arma con sus PIO, una por
+  cámara. El WiFi y el Bluetooth van apagados.
+- **Energía:** una batería 2S de ion litio (2 × 18500) y un solo buck, que da
+  una barra de 3.3 V para todo lo de a bordo. La baliza sonora es independiente,
+  con sus propias pilas.
 - **Heltec de tierra:** un puente transparente al USB que le agrega a cada
   paquete el RSSI y el SNR. Toda la lógica está en la notebook.
 - **GCS:** decodifica, muestra en tiempo real, guarda cada paquete y manda los
@@ -70,14 +87,14 @@ de la Pico desde ahí.
 |---|---|---|
 | [`gcs/`](gcs/) | Estación terrena (Python, PySide6 y pyqtgraph) | **Esqueleto:** estructura, dependencias y CI. Todavía no hace nada útil. |
 | [`protocolo/`](protocolo/) | Formato de telemetría y de telecomandos, compartido por todo lo demás | **Versión 2:** paquete binario de 75 B con cabecera CCSDS y CRC-16, 32 campos agrupados por bloque, cada uno con su etiqueta en inglés. Telecomandos, **versión 1** (#11): 14 B binarios con la misma cabecera, 19 comandos; las consultas responden por el par extra de la telemetría. `vista_formato.py` (#16) genera las tablas de campos y un paquete de ejemplo en ASCII y en binario, en Markdown y CSV, para la PDR. |
-| [`firmware/pico/`](firmware/pico/) | Software de vuelo de la Raspberry Pi Pico 2 | Sin código |
+| [`firmware/pico/`](firmware/pico/) | Software de vuelo de la Raspberry Pi Pico 2 | Sin código. El README tiene la asignación de pines. |
 | [`firmware/heltec/`](firmware/heltec/) | Enlace LoRa, a bordo y en tierra | Sin código |
 | [`firmware/camaras/`](firmware/camaras/) | Cámaras ESP32-S3-CAM N16R8 con OV5640 | Sin código |
 | [`docs/`](docs/) | Decisiones de diseño y su porqué | [Estación terrena](docs/gcs-decisiones.md) |
 
 Lo próximo, en este orden: el decodificador y el estado de misión de la GCS,
-escritos test primero; el simulador de vuelo dentro de la app; y un prototipo de
-la pantalla, que todavía está sin decidir.
+escritos test primero; el simulador de vuelo dentro de la app; y la pantalla,
+que ya se eligió con un prototipo ([decisiones](docs/gcs-decisiones.md)).
 
 ## Cómo correr la estación terrena
 

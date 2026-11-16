@@ -33,13 +33,17 @@ competition (`S1`, `X1`, `G3`…).
 ```mermaid
 flowchart LR
     subgraph cansat["CanSat"]
-        sens["Sensors (I²C)<br/>pressure, temperature, IMU,<br/>voltage and current, clock"]
+        i2c0["I2C0<br/>INA3221 (power)<br/>LSM6DSO32 (IMU)"]
+        i2c1["I2C1<br/>BME280 (environment)<br/>DS3231 (clock)"]
+        gps["GPS L76K"]
         pico["Raspberry Pi Pico 2<br/>flight software"]
         cams["2 × ESP32-S3-CAM<br/>zenith and nadir, microSD"]
-        hb["Heltec LoRa 32 V4<br/>with GPS"]
-        sens --> pico
-        pico <-->|GPIO| cams
-        pico <-->|UART| hb
+        hb["Heltec LoRa 32 V4<br/>LoRa modem"]
+        i2c0 --> pico
+        i2c1 --> pico
+        gps -->|UART1| pico
+        pico <-->|"PIO UART"| cams
+        pico <-->|UART0| hb
     end
     subgraph ground["Ground station"]
         ht["Heltec LoRa 32 V4<br/>bridge, adds RSSI and SNR"]
@@ -51,13 +55,25 @@ flowchart LR
     hb <-.->|"LoRa 915–928 MHz"| ht
 ```
 
-- **Pico 2** (no radio): the core. Reads the sensors, tracks the flight
-  state, drives the cameras and builds the telemetry packets.
-- **On-board Heltec:** the CanSat's only transmitter. Takes the packets from
-  the Pico, adds the GPS data and transmits them on 915–928 MHz (`X1`).
-  Stateless.
+- **Pico 2** (no radio): the core. Reads the sensors and the GPS, tracks the
+  flight state, drives the cameras and the second-descent servo, and builds the
+  complete telemetry packets
+  ([ADR 0001](docs/adr/0001-la-pico-arma-el-paquete.md), Spanish).
+- **Sensors:** on two I²C buses. On I2C0, the INA3221 (battery, 3.3 V rail
+  and solar panel voltage and current) and the LSM6DSO32 (acceleration and
+  rotation). On I2C1, the BME280 (pressure, temperature and humidity) and the
+  DS3231 clock, which gives the Pico a 1 Hz pulse.
+- **GPS:** a separate Seeed Studio L76K, on the Pico's UART1.
+- **On-board Heltec:** the CanSat's only transmitter, a LoRa modem and nothing
+  else. It transmits the packets from the Pico untouched, on 915–928 MHz
+  (`X1`), and forwards to the Pico whatever it receives. Stateless; the Pico
+  can reset it.
 - **Cameras:** the same program on both; they record to their own microSD when
-  the Pico tells them to. WiFi and Bluetooth stay off.
+  the Pico tells them to, over a UART the Pico builds with its PIO blocks, one
+  per camera. WiFi and Bluetooth stay off.
+- **Power:** a 2S lithium-ion battery (2 × 18500) and a single buck converter,
+  which feeds one 3.3 V rail for everything on board. The audio beacon is
+  independent, with its own coin cells.
 - **Ground Heltec:** a transparent bridge to USB that adds RSSI and SNR to each
   packet. All the logic runs on the laptop.
 - **GCS:** decodes, plots in real time, logs every packet and sends the
@@ -75,14 +91,14 @@ generate the Pico's C header from it.
 |---|---|---|
 | [`gcs/`](gcs/) | Ground station (Python, PySide6 and pyqtgraph) | **Skeleton:** structure, dependencies and CI. It does nothing useful yet. |
 | [`protocolo/`](protocolo/) | Telemetry and telecommand format, shared by everything else | **Version 2:** 75-byte binary packet with a CCSDS header and CRC-16, 32 fields grouped by block, each with its English label. Telecommands, **version 1** (#11): 14-byte binary packet with the same header, 19 commands; queries answer through the telemetry's extra pair. `vista_formato.py` (#16) generates the field tables and an example packet in ASCII and binary, as Markdown and CSV, for the PDR. |
-| [`firmware/pico/`](firmware/pico/) | Flight software for the Raspberry Pi Pico 2 | No code yet |
+| [`firmware/pico/`](firmware/pico/) | Flight software for the Raspberry Pi Pico 2 | No code yet. Its README has the pin assignment. |
 | [`firmware/heltec/`](firmware/heltec/) | LoRa link, on board and on the ground | No code yet |
 | [`firmware/camaras/`](firmware/camaras/) | ESP32-S3-CAM N16R8 cameras with OV5640 | No code yet |
 | [`docs/`](docs/) | Design decisions and their rationale | [Ground station](docs/gcs-decisiones.md) (Spanish) |
 
 Next, in this order: the GCS decoder and mission state, written test-first; the
-flight simulator inside the app; and a prototype of the screen layout, which is
-still open.
+flight simulator inside the app; and the screen layout, already chosen with a
+prototype ([decisions](docs/gcs-decisiones.md), Spanish).
 
 ## Running the ground station
 
