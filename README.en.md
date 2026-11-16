@@ -119,6 +119,8 @@ uv run ruff check .  # lint
   `main` through a pull request.
 - Only what passes CI gets into `main`: `ruff check`, `ruff format --check` and
   `pytest`. Run all three before opening the PR.
+- `main` is protected: it accepts no direct pushes or force pushes, a PR cannot
+  be merged while CI is red, and merges are done by the repository maintainer.
 - Telemetry fields are changed in `protocolo/telemetria.toml`, never in code:
   it is the single source of the format.
 - Before proposing a design change, check [`docs/`](docs/) for why things were

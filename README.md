@@ -114,6 +114,9 @@ uv run ruff check .  # lint
 - **Un issue por tema** y una **rama corta** por issue, con un PR a `main`.
 - A `main` sólo entra lo que pasa el CI: `ruff check`, `ruff format --check` y
   `pytest`. Conviene correr los tres antes de abrir el PR.
+- `main` está protegida: no acepta pushes directos ni force pushes, el PR no se
+  puede mergear con el CI en rojo, y los merges los hace el responsable del
+  repo.
 - Un campo de telemetría se cambia en `protocolo/telemetria.toml`, nunca en el
   código: es la única fuente del formato.
 - Antes de proponer un cambio de diseño, mirar [`docs/`](docs/): ahí está por
