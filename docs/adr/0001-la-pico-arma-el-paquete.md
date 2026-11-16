@@ -46,3 +46,6 @@ insertaría en el paquete: dos caminos para el mismo dato.
   reenvía el NMEA crudo por la UART que comparten.
 - La biblioteca dice que la Heltec "recibe los datos de la Pico por UART,
   les suma el GPS y transmite". Hay que corregirlo desde la biblioteca.
+- **Actualización del 2026-11-13:** el pinout del equipo cableó el L76K a la
+  UART1 de la Pico (GP8 y GP9), con su reset y su wake-up, y dejó la UART0 sólo
+  para la Heltec. Se cumplió la propuesta: el NMEA ya no pasa por la Heltec.
