@@ -347,7 +347,7 @@ class Envio:
     numero: int  # el número de telecomando: un reintento lleva el mismo
     nombre: str
     parametro: str | int | None
-    estado: str = "PENDING"  # PENDING, ACK, REJECTED o NO ACK (GLOSSARY)
+    estado: str = "PENDING"  # PENDING, ACK, REJECTED o NO ACK (#21)
     intentos: int = 0
     t_envio: int = 0  # segundo de la notebook del último intento
     por_mandar: bool = True
@@ -2506,8 +2506,16 @@ class SpinMiles(QSpinBox):
         limpio = texto.removesuffix(self.suffix()).replace(MILES, "")
         if limpio in ("", "-"):  # a medio escribir
             return QValidator.State.Intermediate, texto, pos
-        valido = limpio.removeprefix("-").isdigit()
-        return (QValidator.State.Acceptable if valido else QValidator.State.Invalid), texto, pos
+        if not limpio.removeprefix("-").isdigit():
+            return QValidator.State.Invalid, texto, pos
+        # Como el QSpinBox de Qt: lo que se pasó del máximo no se deja tipear;
+        # lo que no llega al mínimo puede estar a medio escribir (el 1 de 12).
+        valor = int(limpio)
+        if valor > self.maximum():
+            return QValidator.State.Invalid, texto, pos
+        if valor < self.minimum():
+            return QValidator.State.Intermediate, texto, pos
+        return QValidator.State.Acceptable, texto, pos
 
 
 COLOR_ESTADO = {"PENDING": "#8a5a0b", "ACK": "#145a32", "REJECTED": "#b03a2e", "NO ACK": "#b03a2e"}
@@ -2635,8 +2643,9 @@ class VarianteEnlace(VarianteG2B):
         return PanelComandosCombo(sim)
 
     def actualizar(self) -> None:
-        if not self.sim.ultimo:  # arranque en frío: sólo el enlace y el pie
+        if not self.sim.ultimo:  # arranque en frío: el enlace, el pie y los telecomandos
             self.t["enlace"].actualizar(self.sim)
+            self.comandos.actualizar()  # sin paquetes, un envío también llega a NO ACK
             self.actualizar_avisos(estado_gcs(self.sim, self))
             return
         super().actualizar()
