@@ -276,13 +276,13 @@ def test_respuestas_acordadas(comandos):
     assert respuestas == {
         "CAM_STATUS": {
             "forma": "bits",
-            "bits": ["cam1_grabando", "cam1_sd_con_lugar", "cam2_grabando", "cam2_sd_con_lugar"],
+            "bits": ["cam1_rec", "cam1_sd", "cam2_rec", "cam2_sd"],
         },
         "GET_SENSORS": {
             "forma": "bits",
             "bits": ["ds3231", "bme280", "ina3221", "gps_l76k", "lsm6dso32"],
         },
-        "TIME_STATUS": {"forma": "valores", "valores": ["SIN_HORA", "TIME_SET", "TIME_SYNC"]},
+        "TIME_STATUS": {"forma": "valores", "valores": ["NO_TIME", "TIME_SET", "TIME_SYNC"]},
         "GET_P0": {"forma": "entero", "unidad": "Pa"},
         "GET_RESETS": {"forma": "entero", "unidad": ""},
         "GET_BAT": {
