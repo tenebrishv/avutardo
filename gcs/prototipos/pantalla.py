@@ -99,6 +99,14 @@ y en gris en las demás (FALLA_SI_CERO).
     el QR de LANDED queda entero. M1 pedía 784 px con la consola; M3 aplastaba
     el gráfico de altitud y pedía 882.
 
+    #56: con los gráficos en 100 px, ALT_BARO quedaba en unos 50 px útiles y
+    con 200, 400 y 600 encimados, y el Recorrido cortaba «North [m]». En K6 y
+    sus derivadas, el título de ALT_BARO va en la cabecera de Vuelo y GPS, el
+    gráfico deja un 3 % de aire en vez del 10 % y las marcas se separan según
+    la altura de la letra; el Recorrido lleva la unidad en el título, «N ↑» y
+    «E →» derechos dentro del mapa en vez de los rótulos de los ejes, y las
+    mismas marcas. Sigue en 765 px (768 en high contrast).
+
 Telecomandos (#21), en las variantes de las rondas 6 y 7: un combobox con los
 19 de `telecomandos.toml` y, al lado, el parámetro que pide cada uno (lista de
 valores, número con su unidad y el rango del .toml, o nada; TIME_SET toma la
@@ -2984,6 +2992,74 @@ class Consola(QTextEdit):
         barra.setValue(barra.maximum())
 
 
+def marcas_legibles(eje: pg.AxisItem, separacion: float = 0.9) -> None:
+    """Que las marcas de un eje vertical no se pisen (#56). pyqtgraph elige
+    cuántas poner por el largo del eje, sin mirar la letra: con 14 pt en un
+    gráfico bajo, 200, 400 y 600 quedaban encimados. Si dos marcas quedan a
+    menos de `separacion` altos de letra, el paso sube por la serie 1, 2, 2.5, 5 y
+    sólo queda ese nivel, con su número en cada marca. Con 0.9 no se pisan
+    (los números no tienen descendentes; pyqtgraph mide su caja al 0.8); con
+    más, el paso se alarga tanto que las únicas marcas caen en los bordes, y
+    pyqtgraph esconde los números que se salen del eje."""
+    original = eje.tickSpacing
+
+    def espaciado(minimo: float, maximo: float, largo: float) -> list:
+        niveles = original(minimo, maximo, largo)
+        rango = abs(maximo - minimo)
+        if not niveles or largo <= 0 or rango == 0:
+            return niveles
+        alto = QFontMetrics(eje.style["tickFont"] or eje.font()).height()
+        necesario = separacion * alto * rango / largo  # en unidades del eje
+        paso = niveles[0][0]
+        if paso >= necesario:
+            return niveles
+        siguiente = {1.0: 2.0, 2.0: 2.5, 2.5: 5.0, 5.0: 10.0}
+        while paso < necesario:
+            potencia = 10 ** math.floor(math.log10(paso))
+            mantisa = round(paso / potencia, 1)
+            paso = siguiente.get(mantisa, 10.0) * potencia
+        return [(paso, 0)]
+
+    eje.tickSpacing = espaciado
+
+
+def titulo_a_la_cabecera(tarjeta: TarjetaH) -> None:
+    """El título del gráfico, en la cabecera de la tarjeta, justo antes del
+    combo de la ventana que lo gobierna; el gráfico se queda con su alto."""
+    w = tarjeta.plots[0]
+    texto = w.plotItem.titleLabel.text
+    w.setTitle(None)
+    cabecera = tarjeta.layout().itemAt(0).layout()
+    cabecera.insertWidget(cabecera.count() - 1, label(texto, negrita=True))
+
+
+def recorrido_compacto(tarjeta: TarjetaRecorrido) -> None:
+    """La unidad en el título y los puntos cardinales derechos, dentro del mapa:
+    con 100 px, el eje mide unos 48 y «North [m]» girado pide 95, y una «N»
+    girada se lee «Z». La columna derecha es la que fija el alto de la
+    ventana: el mapa no puede crecer, pero se queda con la fila del rótulo de
+    abajo."""
+    tarjeta.titulo.setText("Ground track [m]")
+    plot = tarjeta.plot.plotItem
+    for lado in ("left", "bottom"):
+        plot.showLabel(lado, False)
+    marcas_legibles(plot.getAxis("left"))
+    vista = plot.vb
+    html = f"<b style='font-size:{PT}pt; color:{C['texto']}'>{{}}</b>"
+    # Hijos de la ViewBox (no de los datos): quedan quietos en las esquinas.
+    norte = pg.TextItem(html=html.format("N ↑"), anchor=(0, 0))
+    este = pg.TextItem(html=html.format("E →"), anchor=(1, 1))
+    for t in (norte, este):
+        t.setParentItem(vista)
+
+    def ubicar() -> None:
+        r = vista.rect()
+        este.setPos(r.right(), r.bottom())
+
+    vista.sigResized.connect(ubicar)
+    ubicar()
+
+
 class VarianteConsola(VarianteL3):
     """L3 con la consola entre la grilla y el pie; arranca oculta."""
 
@@ -3004,6 +3080,18 @@ class VarianteConsola(VarianteL3):
                 for w in getattr(t, "plots", []):
                     w.setMinimumHeight(minimo)
             self.t["recorrido"].plot.setMinimumHeight(minimo)
+            # #56: con 100 px, la línea del título del gráfico era un cuarto del
+            # alto. El título sube a la cabecera de la tarjeta y el Recorrido
+            # lleva la unidad en el suyo, como Aceleración y Rotación.
+            titulo_a_la_cabecera(self.t["vuelo"])
+            altitud = self.t["vuelo"].plots[0]
+            marcas_legibles(altitud.getAxis("left"))
+            # pyqtgraph deja un 10 % de aire arriba y otro abajo en un gráfico
+            # bajo: de 85 px, 17. Con el 3 %, la curva se queda con ellos.
+            vista = altitud.plotItem.vb
+            margen = vista.suggestPadding
+            vista.suggestPadding = lambda eje: 0.03 if eje == 1 else margen(eje)
+            recorrido_compacto(self.t["recorrido"])
         self.boton = QPushButton()
         self.boton.setCheckable(True)
         self.boton.setFocusPolicy(Qt.FocusPolicy.NoFocus)
