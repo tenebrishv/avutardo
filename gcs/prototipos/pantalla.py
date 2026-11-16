@@ -77,6 +77,28 @@ definido). A 14 pt cada paquete ocupa dos líneas.
     la consola abierta, los gráficos bajan su mínimo de 140 a 100 px: si no,
     la ventana pide 790 px de alto.
 
+Ronda 8 (#51): dónde van los seis campos de la v2 que no estaban en pantalla
+(MODE, HUMIDITY, DESCENT2_STATUS, SERVO_CMD, EXTRA_ID y EXTRA_VALUE), sobre K6.
+MODE fuera de FLIGHT sale en ámbar; EXTRA_VALUE se lee según la `forma` de la
+respuesta en telecomandos.toml. En `bits`, todos los nombres, con los que están
+en 0 tachados: en rojo en GET_SENSORS (un sensor que no responde es una falla)
+y en gris en las demás (FALLA_SI_CERO).
+
+    M1  Por especie       MODE en la franja; HUMIDITY, DESCENT2_STATUS y
+                          SERVO_CMD en Vuelo y GPS; el par extra bajo los ecos
+    M2  Barra de fases    MODE a la izquierda de las fases, el segundo descenso
+                          a la derecha; HUMIDITY en Vuelo y GPS; el par extra en
+                          la franja, al lado de CMD_ECHO
+    M3  Tarjeta Status    MODE, el segundo descenso y el par extra en una
+                          tarjeta entre Vuelo y GPS y el enlace
+    M4  M1 + M2           MODE y DESCENT2_STATUS en la franja, después de
+                          CMD_ECHO; el par extra bajo los ecos, como en M1;
+                          HUMIDITY y SERVO_CMD en una fila de Vuelo y GPS
+
+    Elegida: M4 (2026-11-16). Entra en 768 px con la consola abierta (765) y
+    el QR de LANDED queda entero. M1 pedía 784 px con la consola; M3 aplastaba
+    el gráfico de altitud y pedía 882.
+
 Telecomandos (#21), en las variantes de las rondas 6 y 7: un combobox con los
 19 de `telecomandos.toml` y, al lado, el parámetro que pide cada uno (lista de
 valores, número con su unidad y el rango del .toml, o nada; TIME_SET toma la
@@ -92,7 +114,7 @@ demás quedan NO ACK hasta que CX ON vuelve con ACK.
 
 Correr, desde `gcs/`:
 
-    uv run python prototipos/pantalla.py        # arranca en G2B, la elegida
+    uv run python prototipos/pantalla.py        # arranca en M4, la elegida
     uv run python prototipos/pantalla.py A      # arranca en A
     uv run python prototipos/pantalla.py G2A    # la ronda 5 (#23)
     uv run python prototipos/pantalla.py L1     # la ronda 6 (#24)
@@ -128,7 +150,7 @@ corrida, con los instantes `standby`, `descenso` y `aterrizado`.
 
     uv run python prototipos/pantalla.py --simular demo --hasta descenso
     uv run --with segno python prototipos/pantalla.py --captura salida.png --hasta aterrizado
-    uv run python prototipos/pantalla.py K6 --captura salida.png --hasta consola
+    uv run python prototipos/pantalla.py --captura salida.png --hasta consola
 
 --captura corre fuera de pantalla (1366×768 lógicos con escala 2, según
 `pantalla-captura.json`), graba el PNG a 2732×1536 y sale; en `standby` graba
@@ -2838,6 +2860,264 @@ class VarianteK6F(VarianteConsola):
     boton_en = "franja"
 
 
+# --- ronda 8 (#51): los seis campos de la v2 que faltaban -----------------
+
+ROJO = "#b03a2e"
+GRIS = "#888"
+# Las consultas de bits donde un 0 es una falla. No está en telecomandos.toml,
+# que sólo dice «1 = sí»: es presentación de la GCS. En GET_SENSORS un 0 es un
+# sensor que no responde; en CAM_STATUS un 0 puede ser lo normal (la cámara
+# todavía no graba). Una consulta de bits nueva no entra sola: hay que sumarla.
+FALLA_SI_CERO = {"GET_SENSORS"}
+
+
+def texto_extra(datos: dict) -> tuple[str, str]:
+    """(EXTRA_ID, EXTRA_VALUE en HTML). El valor se lee según la `forma` de la
+    respuesta en telecomandos.toml: en `bits`, todos los nombres (bit 0 = el
+    primero), con los que están en 0 tachados; en rojo si son una falla
+    (FALLA_SI_CERO) y en gris si no."""
+    ident = datos.get("extra_id") or ""
+    if not ident:
+        return "—", "—"
+    resp = COMANDOS.get(ident, {}).get("respuesta", {})
+    v = datos["extra_valor"]
+    forma = resp.get("forma")
+    if forma == "bits":
+        partes = []
+        color = ROJO if ident in FALLA_SI_CERO else GRIS
+        for i, b in enumerate(resp["bits"]):
+            nombre = b.upper()
+            partes.append(nombre if v >> i & 1 else f"<s style='color:{color}'>{nombre}</s>")
+        return ident, " ".join(partes)
+    if forma == "valores":
+        vals = resp["valores"]
+        return ident, vals[v] if 0 <= v < len(vals) else str(v)
+    if forma == "mitades":
+        a, b = resp["alto"], resp["bajo"]
+        alto, bajo = (v >> 16) & 0xFFFF, v & 0xFFFF
+        return ident, (
+            f"{alto / a['divisor']:.3f} {a['unidad']} · {bajo / b['divisor']:.3f} {b['unidad']}"
+        )
+    unidad = resp.get("unidad", "")
+    return ident, agrupar(str(v)) + (f" {unidad}" if unidad else "")
+
+
+def estilo_modo(modo: str) -> str:
+    """MODE fuera de FLIGHT se tiene que ver de lejos: en ámbar. Fondo y color
+    sin borde: el borde de NIVEL le suma 4 px de alto a la franja, y la ventana
+    se pasa de 768 con la consola abierta."""
+    if modo in ("FLIGHT", ""):
+        return ""
+    return "background: #fdf2e0; color: #8a5a0b; padding: 0px 6px;"
+
+
+def sumar_filas(tarjeta: TarjetaH, filas: list[tuple[int, int, str]]) -> None:
+    """Agrega pares rótulo-valor a la grilla de una tarjeta: (fila, columna de
+    pares, campo). La tarjeta los refresca sola, como los suyos."""
+    grilla = tarjeta.layout().itemAt(1).layout()
+    for f, c, nombre in filas:
+        rotulo = label(con_unidad(nombre))
+        grilla.addWidget(rotulo, f, 2 * c)
+        val = label("—", negrita=True, alinear=Qt.AlignmentFlag.AlignRight)
+        tarjeta.valores[nombre] = val
+        grilla.addWidget(val, f, 2 * c + 1)
+
+
+class BloqueExtra(QWidget):
+    """El par extra en dos filas: EXTRA_ID con su valor, y EXTRA_VALUE con la
+    respuesta debajo, en varias líneas si no entra."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        g = QGridLayout(self)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setHorizontalSpacing(8)
+        g.setVerticalSpacing(0)
+        g.addWidget(label(con_unidad("extra_id")), 0, 0)
+        self.ident = label("—", negrita=True, alinear=Qt.AlignmentFlag.AlignRight)
+        g.addWidget(self.ident, 0, 1)
+        g.addWidget(label(con_unidad("extra_valor")), 1, 0, 1, 2)
+        self.valor = label("—", negrita=True)
+        self.valor.setWordWrap(True)
+        g.addWidget(self.valor, 2, 0, 1, 2)
+
+    def actualizar(self, datos: dict) -> None:
+        ident, valor = texto_extra(datos)
+        self.ident.setText(ident)
+        self.valor.setText(valor)
+
+
+class VarianteM1(VarianteK6):
+    """Cada campo con los de su especie: MODE en la franja, junto a los tiempos;
+    HUMIDITY, DESCENT2_STATUS y SERVO_CMD en Vuelo y GPS; el par extra bajo los
+    ecos de los telecomandos, que es donde se pidió."""
+
+    nombre = "Round 8 (#51): each field with its kind"
+
+    def __init__(self, sim: Simulador) -> None:
+        super().__init__(sim)
+        caja, self.modo = indicador(con_unidad("modo"))
+        self.franja.layout().insertWidget(2, caja, 1)  # después de RTC_DATETIME
+        sumar_filas(
+            self.t["vuelo"],
+            [(4, 0, "humedad"), (5, 0, "estado_descenso2"), (5, 1, "servo")],
+        )
+        self.extra = BloqueExtra()
+        linea = QFrame()
+        linea.setFrameShape(QFrame.Shape.HLine)
+        cv = self.caja_comandos.layout()
+        cv.addWidget(linea)
+        cv.addWidget(self.extra)
+
+    def actualizar(self) -> None:
+        super().actualizar()
+        d = self.sim.ultimo
+        if not d:
+            return
+        self.modo.setText(d["modo"])
+        self.modo.setStyleSheet(estilo_modo(d["modo"]))
+        self.extra.actualizar(d)
+
+
+class VarianteM2(VarianteK6):
+    """Lo que dice en qué anda el CanSat, alrededor de la barra de fases: MODE a
+    la izquierda, el segundo descenso a la derecha. HUMIDITY en Vuelo y GPS y el
+    par extra en la franja, al lado del eco del que es respuesta."""
+
+    nombre = "Round 8 (#51): around the phase bar"
+
+    def __init__(self, sim: Simulador) -> None:
+        super().__init__(sim)
+        fases = self.layout().itemAt(1).layout()
+        self.modo = label("", alinear=Qt.AlignmentFlag.AlignCenter)
+        fases.insertWidget(0, self.modo)
+        self.descenso = label("", alinear=Qt.AlignmentFlag.AlignCenter)
+        fases.addWidget(self.descenso)
+        sumar_filas(self.t["vuelo"], [(4, 0, "humedad")])
+        # El par extra, una caja más de la franja: rótulo arriba y respuesta abajo.
+        caja = QFrame()
+        caja.setFrameShape(QFrame.Shape.StyledPanel)
+        v = QVBoxLayout(caja)
+        v.setContentsMargins(8, 2, 8, 2)
+        v.setSpacing(0)
+        self.extra_id = label("")
+        self.extra = label("—", negrita=True)
+        self.extra.setWordWrap(True)
+        v.addWidget(self.extra_id)
+        v.addWidget(self.extra)
+        fila = self.franja.layout()
+        fila.insertWidget(3, caja, 3)  # después de CMD_ECHO
+        for i, estirar in enumerate([1, 1, 2]):  # MISSION_TIME, RTC, CMD_ECHO
+            fila.setStretch(i, estirar)
+        self.poner_textos({})
+
+    def poner_textos(self, d: dict) -> None:
+        modo = d.get("modo", "—")
+        self.modo.setText(f"{con_unidad('modo')} <b>{modo}</b>")
+        self.modo.setStyleSheet(
+            (estilo_modo(modo) or "border: 2px solid #bbb;") + "padding: 2px 8px;"
+        )
+        estado, servo = d.get("estado_descenso2", "—"), d.get("servo")
+        self.descenso.setText(
+            f"{con_unidad('estado_descenso2')} <b>{estado}</b>"
+            f" · {con_unidad('servo')} <b>{fmt('servo', servo) if servo is not None else '—'}</b>"
+        )
+        self.descenso.setStyleSheet("border: 2px solid #bbb; padding: 2px 8px;")
+        ident, valor = texto_extra(d) if d else ("—", "—")
+        self.extra_id.setText(f"{con_unidad('extra_id')} {ident} · {con_unidad('extra_valor')}")
+        self.extra.setText(valor)
+
+    def actualizar(self) -> None:
+        super().actualizar()
+        if self.sim.ultimo:
+            self.poner_textos(self.sim.ultimo)
+
+
+class VarianteM3(VarianteK6):
+    """Una tarjeta propia, Status, entre Vuelo y GPS y el enlace: MODE, el
+    segundo descenso y el par extra juntos. HUMIDITY en Vuelo y GPS."""
+
+    nombre = "Round 8 (#51): own Status card"
+
+    def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
+        super().ubicar(g, columna)
+        sumar_filas(self.t["vuelo"], [(4, 0, "humedad")])
+        tarjeta = QFrame()
+        tarjeta.setObjectName("tarjeta")
+        tarjeta.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        tarjeta.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        v = QVBoxLayout(tarjeta)
+        v.setContentsMargins(6, 4, 6, 4)
+        v.setSpacing(2)
+        v.addWidget(label("Status", negrita=True, pt=PT + 2))
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(10)
+        grilla.setVerticalSpacing(0)
+        self.valores_estado: dict[str, QLabel] = {}
+        for f, c, nombre in [
+            (0, 0, "modo"),
+            (0, 1, "estado_descenso2"),
+            (1, 0, "extra_id"),
+            (1, 1, "servo"),
+        ]:
+            grilla.addWidget(label(con_unidad(nombre)), f, 2 * c)
+            val = label("—", negrita=True, alinear=Qt.AlignmentFlag.AlignRight)
+            self.valores_estado[nombre] = val
+            grilla.addWidget(val, f, 2 * c + 1)
+        grilla.addWidget(label(con_unidad("extra_valor")), 2, 0)
+        self.extra = label("—", negrita=True)
+        self.extra.setWordWrap(True)
+        grilla.addWidget(self.extra, 2, 1, 1, 3)
+        v.addLayout(grilla)
+        izq = g.itemAtPosition(0, 0).layout()  # Vuelo y GPS, y el enlace
+        izq.insertWidget(1, tarjeta)
+
+    def actualizar(self) -> None:
+        super().actualizar()
+        d = self.sim.ultimo
+        if not d:
+            return
+        ident, valor = texto_extra(d)
+        for nombre, val in self.valores_estado.items():
+            val.setText(ident if nombre == "extra_id" else fmt(nombre, d[nombre]))
+        self.valores_estado["modo"].setStyleSheet(estilo_modo(d["modo"]))
+        self.extra.setText(valor)
+
+
+class VarianteM4(VarianteK6):
+    """La elegida, M1 + M2: MODE y DESCENT2_STATUS en la franja, después de
+    CMD_ECHO (donde M2 tenía el par extra); el par extra bajo los ecos de los
+    telecomandos, como en M1; HUMIDITY y SERVO_CMD en una fila de Vuelo y GPS."""
+
+    nombre = "Round 8 (#51): status in the top strip, extra under telecommands"
+
+    def __init__(self, sim: Simulador) -> None:
+        super().__init__(sim)
+        fila = self.franja.layout()
+        self.estado: dict[str, QLabel] = {}
+        for i, nombre in enumerate(["modo", "estado_descenso2"]):
+            caja, valor = indicador(con_unidad(nombre))
+            self.estado[nombre] = valor
+            fila.insertWidget(3 + i, caja, 1)  # después de CMD_ECHO
+        sumar_filas(self.t["vuelo"], [(4, 0, "humedad"), (4, 1, "servo")])
+        self.extra = BloqueExtra()
+        linea = QFrame()
+        linea.setFrameShape(QFrame.Shape.HLine)
+        cv = self.caja_comandos.layout()
+        cv.addWidget(linea)
+        cv.addWidget(self.extra)
+
+    def actualizar(self) -> None:
+        super().actualizar()
+        d = self.sim.ultimo
+        if not d:
+            return
+        for nombre, val in self.estado.items():
+            val.setText(fmt(nombre, d[nombre]))
+        self.estado["modo"].setStyleSheet(estilo_modo(d["modo"]))
+        self.extra.actualizar(d)
+
+
 # --- ventana y selector de variante ---------------------------------------
 
 VARIANTES = {
@@ -2859,6 +3139,10 @@ VARIANTES = {
     "K3": VarianteK3,
     "K6": VarianteK6,
     "K6F": VarianteK6F,
+    "M1": VarianteM1,
+    "M2": VarianteM2,
+    "M3": VarianteM3,
+    "M4": VarianteM4,
 }
 
 
@@ -3144,7 +3428,7 @@ def capturar_demo(app: QApplication, v: Ventana, instante: str, destino: Path) -
     v.show()
     if instante == "consola":
         if not isinstance(v.vista, VarianteConsola):
-            sys.exit("--hasta consola needs a console variant (K3, K6 or K6F)")
+            sys.exit("--hasta consola needs a console variant (K3, K6, K6F or M1 to M4)")
         v.vista.boton.setChecked(True)
     app.processEvents()
     avanzar(v, instante)
@@ -3180,7 +3464,7 @@ def capturar_demo(app: QApplication, v: Ventana, instante: str, destino: Path) -
 
 def argumentos() -> argparse.Namespace:
     a = argparse.ArgumentParser(description="Avutardo GCS screen prototype (simulated data).")
-    a.add_argument("variante", nargs="?", default=None, help="layout variant (default: G2B)")
+    a.add_argument("variante", nargs="?", default=None, help="layout variant (default: M4)")
     a.add_argument("--simular", choices=["demo"], help="run the fixed demo flight")
     a.add_argument("--hasta", choices=INSTANTES, help="advance the demo flight to this instant")
     a.add_argument(
@@ -3202,9 +3486,7 @@ def main() -> None:
     args = argumentos()
     if args.captura:
         preparar_captura()
-    por_defecto = "L3" if args.captura else "G2B"
-    if args.hasta == "consola":
-        por_defecto = "K6"
+    por_defecto = "M4"  # la elegida (#51); con la consola de K6
     inicial = (args.variante or por_defecto).upper()
     app = QApplication(sys.argv[:1])
     f = app.font()
