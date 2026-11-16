@@ -575,9 +575,9 @@ class PanelComandos(QWidget):
 
 
 GRAFICOS_G7 = [
-    ("ALT_BARO", "m", ["altitud"]),
-    ("BAT_VOLTAGE", "V", ["tension_bateria"]),
-    ("BAT_CURRENT", "A", ["corriente_bateria"]),
+    (ETIQUETA["altitud"], UNIDAD["altitud"], ["altitud"]),
+    (ETIQUETA["tension_bateria"], UNIDAD["tension_bateria"], ["tension_bateria"]),
+    (ETIQUETA["corriente_bateria"], UNIDAD["corriente_bateria"], ["corriente_bateria"]),
     ("Acceleration", "m/s²", ["acel_x", "acel_y", "acel_z"]),
     ("Rotation rate", "°/s", ["rot_x", "rot_y", "rot_z"]),
 ]
@@ -655,7 +655,7 @@ class VarianteA(QWidget):
             self.curvas.update(c)
             grilla.addWidget(w, i // 3, i % 3)
         # sexto lugar: temperatura (G8), para cerrar la grilla de 3 × 2
-        w, c = grafico("TEMPERATURE", "°C", ["temperatura"])
+        w, c = grafico(ETIQUETA["temperatura"], UNIDAD["temperatura"], ["temperatura"])
         self.curvas.update(c)
         grilla.addWidget(w, 1, 2)
         medio.addLayout(grilla, 1)
@@ -701,7 +701,7 @@ class VarianteB(QWidget):
         cabeza.addWidget(label(con_unidad("altitud"), pt=PT))
         cabeza.addWidget(self.alt)
         izq.addLayout(cabeza)
-        w, self.c_alt = grafico("ALT_BARO", "m", ["altitud"])
+        w, self.c_alt = grafico(ETIQUETA["altitud"], UNIDAD["altitud"], ["altitud"])
         izq.addWidget(w, 3)
 
         # Toda la telemetría en texto (G5) como registro: una fila por paquete,
@@ -832,12 +832,12 @@ class VarianteC(QWidget):
             Tarjeta(
                 "Flight",
                 ["altitud", "presion", "temperatura"],
-                ("ALT_BARO", "m", ["altitud"]),
+                (ETIQUETA["altitud"], UNIDAD["altitud"], ["altitud"]),
             ),
             Tarjeta(
                 "Power",
                 ["tension_bateria", "corriente_bateria"],
-                ("BAT_VOLTAGE", "V", ["tension_bateria"]),
+                (ETIQUETA["tension_bateria"], UNIDAD["tension_bateria"], ["tension_bateria"]),
             ),
             Tarjeta(
                 "Acceleration",
@@ -858,7 +858,8 @@ class VarianteC(QWidget):
         energia = self.tarjetas[2]
         w = energia.findChild(pg.PlotWidget)
         energia.curvas["corriente_bateria"] = w.plot(pen=pg.mkPen(COLORES["dos"], width=TRAZO))
-        w.setTitle("<b>BAT_VOLTAGE [V] and BAT_CURRENT [A]</b>", size=f"{PT}pt")
+        titulo = f"{con_unidad('tension_bateria')} and {con_unidad('corriente_bateria')}"
+        w.setTitle(f"<b>{titulo}</b>", size=f"{PT}pt")
 
         g.addWidget(self.tarjetas[0], 0, 0)
         g.addWidget(self.tarjetas[1], 0, 1, 1, 2)
@@ -1112,7 +1113,7 @@ class Hibrido(QWidget):
             "vuelo": self.clase_tarjeta(
                 "Flight and GPS" if self.gps_en_vuelo else "Flight",
                 vuelo + (gps if self.gps_en_vuelo else []),
-                [("ALT_BARO", "m", ["altitud"])],
+                [(ETIQUETA["altitud"], UNIDAD["altitud"], ["altitud"])],
                 columnas=2,
             ),
             "energia": self.tarjeta_energia(),
@@ -1139,8 +1140,8 @@ class Hibrido(QWidget):
             "Power",
             ["tension_bateria", "corriente_bateria"],
             [
-                ("BAT_VOLTAGE", "V", ["tension_bateria"]),
-                ("BAT_CURRENT", "A", ["corriente_bateria"]),
+                (ETIQUETA["tension_bateria"], UNIDAD["tension_bateria"], ["tension_bateria"]),
+                (ETIQUETA["corriente_bateria"], UNIDAD["corriente_bateria"], ["corriente_bateria"]),
             ],
             columnas=2,
         )
@@ -1991,12 +1992,13 @@ class VarianteG2C(VarianteG2):
 
 ANCHO_L3 = 260  # la columna derecha de L3: el Recorrido gana ancho
 LOST_TRAS = 3  # s sin un recibido para LINK LOST (GLOSSARY: enlace perdido)
+TX_POWER = con_unidad("potencia_tx")  # el único campo de la sección
 ORDEN_ENLACE = [
     "RSSI",
     "SNR",
     "Noise floor (est.)",
     "PER",
-    "TX_POWER",
+    TX_POWER,
     "Received",
     "Transmitted",
     "Lost",
@@ -2009,7 +2011,7 @@ MAS_ANCHO = {  # el valor más ancho de cada uno: así la franja no salta
     "SNR": "-20.0 dB",
     "Noise floor (est.)": "-120 dBm",
     "PER": "99.9 %",
-    "TX_POWER": "22 dBm",
+    TX_POWER: "22",
 }
 
 
@@ -2041,7 +2043,7 @@ def valores_enlace(sim: Simulador) -> dict[str, str]:
         "SNR": f"{sim.snr:.1f} dB" if hay else "—",
         "Noise floor (est.)": f"{noise_floor(sim.rssi, sim.snr):.0f} dBm" if hay else "—",
         "PER": f"{100 * sim.perdidos / transmitidos:.1f} %" if hay else "—",
-        "TX_POWER": f"{potencia} dBm" if potencia is not None else "—",
+        TX_POWER: str(potencia) if potencia is not None else "—",
         "Received": fmt("", sim.recibidos),
         "Transmitted": fmt("", transmitidos) if hay else "—",
         "Lost": fmt("", sim.perdidos),
