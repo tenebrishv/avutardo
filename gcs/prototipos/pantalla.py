@@ -92,19 +92,31 @@ Para probar la simulación:
               sigue en su estado; el contador y el tiempo de misión siguen
               (F1, F2, F5)
 
+Vuelo de demostración y capturas de la diap. 77 (#26): el mismo vuelo en cada
+corrida, con los instantes `standby`, `descenso` y `aterrizado`.
+
+    uv run python prototipos/pantalla.py --simular demo --hasta descenso
+    uv run --with segno python prototipos/pantalla.py --captura salida.png --hasta aterrizado
+
+--captura corre fuera de pantalla (1366×768 lógicos con escala 2, según
+`pantalla-captura.json`), graba el PNG a 2732×1536 y sale; en `standby` graba
+además los recortes del diálogo de altitud cero, los telecomandos y Vuelo y GPS.
+
 El QR de G necesita `segno`, que no es dependencia de la GCS: correr con
 `uv run --with segno python prototipos/pantalla.py G`.
 """
 
 from __future__ import annotations
 
+import argparse
 import bisect
 import math
+import os
 import random
 import sys
 import tomllib
 from collections import deque
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pyqtgraph as pg
@@ -211,11 +223,42 @@ def con_unidad(nombre: str) -> str:
 
 # --- simulador de juguete -------------------------------------------------
 
+# Vuelo de demostración (#8, "Vuelo de demostración" en docs/gcs-decisiones.md):
+# el mismo en cada corrida, del que salen las capturas de la diap. 77.
+SEMILLA_DEMO = 8
+HORA_DEMO = datetime(2026, 11, 17, 15, 0, tzinfo=UTC)  # hora UTC al arrancar
+EYECCION = 12  # s desde el despegue: comienzo de misión (X3)
+GUION_DEMO = {  # segundo de la notebook → telecomando, mandado en STANDBY
+    10: ("TIME_SET", str(int(HORA_DEMO.timestamp()) + 10)),
+    15: ("CAL_ALT", ""),
+}
+# Segundos desde el despegue → falla. El descartado también deja un hueco, así
+# que es el perdido del descenso: 3 perdidos y 1 descartado hasta `descenso`.
+FALLAS_DEMO = {4: "perdido", 5: "perdido", 30: "crc", 100: "perdido"}
+INSTANTES = ("standby", "descenso", "aterrizado")
+
+
+def llego(sim: Simulador, instante: str) -> bool:
+    """Si el vuelo de demostración ya está en el instante con nombre."""
+    if instante == "standby":
+        return sim.reloj >= 20
+    if instante == "descenso":
+        return sim.t - sim.despegue >= EYECCION + 40
+    return sim.t_aterrizaje is not None and sim.t - sim.t_aterrizaje >= 10
+
 
 class Simulador:
-    """Un vuelo tipo Prometeo a 1 Hz, con algún paquete perdido."""
+    """Un vuelo tipo Prometeo a 1 Hz, con algún paquete perdido; con `demo`,
+    el vuelo de demostración: semilla fija, sin pérdidas al azar y con las
+    fallas y los telecomandos de su guion."""
 
-    def __init__(self, precarga: bool = True) -> None:
+    def __init__(self, precarga: bool = True, demo: bool = False) -> None:
+        self.demo = demo
+        self.azar = random.Random(SEMILLA_DEMO if demo else None)
+        self.despegue = 30 if demo else 45  # segundos de STANDBY
+        self.v2 = 4.3 if demo else 3.5  # bajada con el segundo descenso [m/s]
+        self.p_perdida = 0.0 if demo else 0.04
+        self.sesgo_alt = 3.0 if demo else 0.0  # corrida hasta la altitud cero
         self.t = 0.0
         self.contador = 0
         self.recibidos = 0
@@ -264,8 +307,8 @@ class Simulador:
         self.reinicio = 0  # segundos que le faltan a la FSW para volver
         self.boot = False  # el próximo paquete sale en BOOT
         # Arranca con 40 s en la rampa y el lanzamiento a los 45 s, para que los
-        # gráficos no estén vacíos al abrir.
-        for _ in range(40 if precarga else 0):
+        # gráficos no estén vacíos al abrir. El de demostración arranca de cero.
+        for _ in range(40 if precarga and not demo else 0):
             self.paso()
 
     def _perfil(self, tv: float) -> tuple[float, str]:
@@ -277,14 +320,16 @@ class Simulador:
         if alt > 0.8 * 673:
             return alt, "DESCENT_1"
         t2 = 12 + (673 - 0.8 * 673) / 15
-        alt = 0.8 * 673 - 3.5 * (tv - t2)
+        alt = 0.8 * 673 - self.v2 * (tv - t2)
         return (alt, "DESCENT_2") if alt > 0 else (0.0, "LANDED")
 
     def paso(self) -> None:
         self.reloj += 1
+        if self.demo and self.reloj in GUION_DEMO:
+            self.telecomando(*GUION_DEMO[self.reloj])
         # #24: otro equipo transmite cada 4 s desde el despegue, y una vez llega
         # un paquete de otro largo. Los ajenos no tocan los otros conteos.
-        tl = self.reloj - 45
+        tl = self.reloj - self.despegue
         if tl >= 0 and tl % 4 == 0:
             self.ajenos += 1
         if tl == 21:
@@ -300,9 +345,9 @@ class Simulador:
             return
         self.t += 1
         self.contador += 1
-        tv = self.t - 45
+        tv = self.t - self.despegue
         alt, estado = self._perfil(tv)
-        rot_z = random.gauss(0, 3) + (90 if 12 <= tv < 60 else 0)
+        rot_z = self.azar.gauss(0, 3) + (90 if 12 <= tv < 60 else 0)
         energia = self._energia(estado, rot_z)
         if self.boot:  # el primer paquete después del reinicio
             estado = "BOOT"
@@ -311,8 +356,8 @@ class Simulador:
             self.deriva += 1
         if self.ultimo and estado != self.ultimo["estado_fsw"]:
             self.t_cambio = self.t
-        alt += random.gauss(0, 0.4)
-        r = random.gauss
+        alt += self.azar.gauss(0, 0.4)
+        r = self.azar.gauss
         g = 9.81
         empuje = 60 if 0 <= tv < 2 else 0
         golpe = 80 if 12 <= tv < 13 else 0
@@ -325,11 +370,12 @@ class Simulador:
             # Operación
             "estado_fsw": estado,
             "modo": "FLIGHT",
-            "hora": datetime.now(UTC).strftime("%H:%M:%S"),
-            "tiempo_mision": self.t,
+            "hora": self.hora().strftime("%H:%M:%S"),
+            # Segundos enteros desde el comienzo de misión; antes, sin dato (.toml).
+            "tiempo_mision": int(tv - EYECCION) if tv >= EYECCION else NAN,
             # Ambiental
             "presion": 101325 * (1 - 2.25577e-5 * alt) ** 5.25588 + r(0, 3),
-            "altitud": alt - self.offset_alt,
+            "altitud": alt + self.sesgo_alt - self.offset_alt,
             "temperatura": 18.0 - 0.0065 * alt + r(0, 0.1),
             "humedad": round(45 + r(0, 0.5)),
             # Energía (#23)
@@ -362,6 +408,11 @@ class Simulador:
         if self.sin_fix:  # 0 satélites es un dato real; la posición, sin dato
             nan = float("nan")
             p.update(gps_latitud=nan, gps_longitud=nan, gps_altitud=nan, gps_satelites=0)
+        falla = FALLAS_DEMO.get(tv) if self.demo else None
+        if falla == "perdido":
+            return
+        if falla == "crc":
+            self.crc_roto += 1
         if self.rafaga > 0:
             self.rafaga -= 1
             return
@@ -369,7 +420,7 @@ class Simulador:
             self.crc_roto -= 1
             self.descartados += 1
             return
-        if self.enlace_caido or (random.random() < 0.04 and self.contador > 3):
+        if self.enlace_caido or (self.azar.random() < self.p_perdida and self.contador > 3):
             return  # paquete perdido en el aire
         if self.ultimo_contador is not None:
             self.perdidos += self.contador - self.ultimo_contador - 1
@@ -405,7 +456,7 @@ class Simulador:
         de la PDR), con la Heltec al 57 % de TX: cierra con 4.64 Wh en 120 min.
         Cada corriente es el promedio del segundo, no una muestra de la TX.
         """
-        r = random.gauss
+        r = self.azar.gauss
         previo, self.estado_sim = self.estado_sim, estado
         if estado == "LANDED" and self.t_aterrizaje is None:
             self.t_aterrizaje = self.t
@@ -445,10 +496,16 @@ class Simulador:
             "corriente_panel": v_panel / 100 + r(0, 0.0005),
         }
 
+    def hora(self) -> datetime:
+        """La del reloj de la notebook; en el de demostración, fija."""
+        if self.demo:
+            return HORA_DEMO + timedelta(seconds=self.t)
+        return datetime.now(UTC)
+
     def saltar(self, estado: str) -> None:
         """Corre el vuelo hasta que el perfil llegue a `estado` (sólo hacia adelante)."""
         for _ in range(1000):
-            if self.cortado or self._perfil(self.t - 45)[1] == estado:
+            if self.cortado or self._perfil(self.t - self.despegue)[1] == estado:
                 return
             self.paso()
 
@@ -502,7 +559,9 @@ def grafico(titulo: str, unidad: str, series: list[str]) -> tuple[pg.PlotWidget,
         eje.setTextPen("k")
         eje.setStyle(tickFont=fuente)
     estilo = {"color": "#000", "font-size": f"{PT}pt", "font-weight": "bold"}
-    w.setLabel("bottom", con_unidad("tiempo_mision"), **estilo)
+    # Segundos desde que arrancó la estación: MISSION_TIME no tiene dato antes de
+    # la eyección.
+    w.setLabel("bottom", "Time [s]", **estilo)
     w.showGrid(x=True, y=True, alpha=0.25)
     w.setMouseEnabled(False, False)
     w.hideButtons()
@@ -1118,13 +1177,13 @@ class Hibrido(QWidget):
             ),
             "energia": self.tarjeta_energia(),
             "acel": self.clase_tarjeta(
-                "Acceleration",
+                "Accel.",
                 ["acel_x", "acel_y", "acel_z"],
                 [("Acceleration", "m/s²", ["acel_x", "acel_y", "acel_z"])],
                 columnas=self.columnas_xyz,
             ),
             "rot": self.clase_tarjeta(
-                "Rotation rate",
+                "Rotation",
                 ["rot_x", "rot_y", "rot_z"],
                 [("Rotation rate", "°/s", ["rot_x", "rot_y", "rot_z"])],
                 columnas=self.columnas_xyz,
@@ -1544,6 +1603,7 @@ class VarianteG(Hibrido):
         cv = QVBoxLayout(caja)
         cv.setContentsMargins(4, 4, 4, 4)
         cv.addWidget(label("Telecommands", negrita=True, pt=PT + 2))
+        self.caja_comandos = caja  # el recorte de `standby`
         self.comandos = self.panel_comandos(sim)
         cv.addWidget(self.comandos)
         columna.addWidget(caja)
@@ -2134,6 +2194,12 @@ class FranjaSinConteos(Franja):
             valor.setText(fmt(clave, datos[clave]) if datos[clave] != "" else "—")
 
 
+def dialogo_confirmar(padre: QWidget, nombre: str) -> QMessageBox:
+    """El diálogo de un comando con confirmación; también sale en la captura."""
+    botones = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    return QMessageBox(QMessageBox.Icon.Question, "Confirm", f"Send {nombre}?", botones, padre)
+
+
 class PanelComandosCombo(QWidget):
     """SUSTITUTO de la #21, sólo por su alto: combobox, parámetro, Send y los
     últimos ecos. Sin PENDING, reintentos ni NO ACK: eso es la #21."""
@@ -2168,8 +2234,9 @@ class PanelComandosCombo(QWidget):
     def mandar(self) -> None:
         nombre = self.combo.currentText()
         if nombre in self.CONFIRMAR:
-            r = QMessageBox.question(self, "Confirm", f"Send {nombre}?")
-            if r != QMessageBox.StandardButton.Yes:
+            caja = dialogo_confirmar(self, nombre)
+            caja.exec()
+            if caja.standardButton(caja.clickedButton()) != QMessageBox.StandardButton.Yes:
                 return
         self.sim.telecomando(nombre, self.param.text())
         self.param.clear()
@@ -2311,11 +2378,12 @@ class Selector(QFrame):
 
 
 class Ventana(QMainWindow):
-    def __init__(self, inicial: str) -> None:
+    def __init__(self, inicial: str, demo: bool = False) -> None:
         super().__init__()
         nota = "Simulated data" + ("; provisional format" if FORMATO.get("provisorio") else "")
         self.setWindowTitle(f"Avutardo GCS — PROTOTYPE — {nota}")
-        self.sim = Simulador()
+        self.demo = demo
+        self.sim = Simulador(demo=demo)
         self.claves = list(VARIANTES)
         self.actual = inicial
         self.selector = Selector(self)
@@ -2378,7 +2446,7 @@ class Ventana(QMainWindow):
 
     def reiniciar(self) -> None:
         """F5: un vuelo nuevo desde STANDBY, en la misma variante."""
-        self.sim = Simulador()
+        self.sim = Simulador(demo=self.demo)
         self.poner(self.actual)
         self.avisar("Flight restarted")
 
@@ -2398,9 +2466,9 @@ class Ventana(QMainWindow):
         """1 a 5: hacia adelante corre el vuelo; hacia atrás, lo reinicia antes."""
         if isinstance(QApplication.focusWidget(), QLineEdit):
             return
-        actual = FASES.index(self.sim._perfil(self.sim.t - 45)[1])
+        actual = FASES.index(self.sim._perfil(self.sim.t - self.sim.despegue)[1])
         if FASES.index(fase) < actual or self.sim.cortado:
-            self.sim = Simulador()
+            self.sim = Simulador(demo=self.demo)
             self.poner(self.actual)
         self.sim.saltar(fase)
         self.refrescar()
@@ -2510,15 +2578,127 @@ ESTILO = (
 )
 
 
+# --- capturas de la diap. 77 ----------------------------------------------
+
+ESCALA = 2  # 1366×768 lógicos con el doble de píxeles: 2732×1536 (#4, Q6)
+
+
+def preparar_captura() -> None:
+    """Antes de crear la QApplication: pantalla fuera de pantalla de 1366×768
+    con escala 2, y las fuentes del sistema (sin ellas, el texto sale en cajas).
+
+    Qt separa las opciones de la plataforma con «:», así que la ruta del JSON
+    va relativa y sin letra de unidad."""
+    config = Path(__file__).with_name("pantalla-captura.json")
+    try:
+        relativa = os.path.relpath(config).replace(os.sep, "/")
+    except ValueError:
+        sys.exit("--captura must run from the same drive as the repository")
+    os.environ["QT_QPA_PLATFORM"] = f"offscreen:configfile={relativa}"
+    fuentes = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+    if fuentes.is_dir():
+        os.environ.setdefault("QT_QPA_FONTDIR", str(fuentes))
+
+
+def imagen(widget: QWidget) -> QImage:
+    """El widget dibujado al doble de píxeles (no escalado después)."""
+    img = QImage(widget.size() * ESCALA, QImage.Format.Format_ARGB32)
+    img.setDevicePixelRatio(ESCALA)
+    img.fill(QColor("white"))
+    widget.render(img)
+    return img
+
+
+def avanzar(v: Ventana, instante: str) -> None:
+    """Corre el vuelo de demostración hasta el instante, refrescando la vista
+    en cada paso: el panel de telecomandos sólo anota un eco cuando lo ve."""
+    for _ in range(1000):
+        if llego(v.sim, instante):
+            return
+        v.sim.paso()
+        v.refrescar()
+    sys.exit(f"The demo flight never reached {instante!r}")
+
+
+def capturar_demo(app: QApplication, v: Ventana, instante: str, destino: Path) -> None:
+    """Graba la pantalla entera en el instante; en `standby`, además, los
+    recortes del diálogo de altitud cero, los telecomandos y Vuelo y GPS."""
+    if instante == "aterrizado" and pixmap_qr("x", 10) is None:
+        sys.exit("The landed capture needs segno: uv run --with segno python ...")
+    v.timer.stop()
+    v.resize(1366, 768)
+    v.show()
+    app.processEvents()
+    avanzar(v, instante)
+    v.selector.hide()
+    app.processEvents()
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    entera = imagen(v)
+    esperado = (1366 * ESCALA, 768 * ESCALA)
+    assert (entera.width(), entera.height()) == esperado, (entera.size(), esperado)
+    entera.save(str(destino))
+    grabadas = [destino]
+    if instante == "standby":
+        dialogo = dialogo_confirmar(v, "CAL_ALT")
+        dialogo.show()
+        app.processEvents()
+        recortes = {
+            "confirmacion": dialogo,
+            "telecomandos": v.vista.caja_comandos,
+            "vuelo": v.vista.t["vuelo"],
+        }
+        for nombre, widget in recortes.items():
+            ruta = destino.with_name(f"{destino.stem}-{nombre}{destino.suffix}")
+            imagen(widget).save(str(ruta))
+            grabadas.append(ruta)
+        dialogo.close()
+    for ruta in grabadas:
+        print(f"Saved {ruta}")
+
+
+def argumentos() -> argparse.Namespace:
+    a = argparse.ArgumentParser(description="Avutardo GCS screen prototype (simulated data).")
+    a.add_argument("variante", nargs="?", default=None, help="layout variant (default: G2B)")
+    a.add_argument("--simular", choices=["demo"], help="run the fixed demo flight")
+    a.add_argument("--hasta", choices=INSTANTES, help="advance the demo flight to this instant")
+    a.add_argument(
+        "--captura",
+        type=Path,
+        metavar="PNG",
+        help="save a 2732x1536 screenshot offscreen and exit (implies --simular demo; "
+        "needs --hasta; default variant: L3)",
+    )
+    args = a.parse_args()
+    if args.captura and not args.hasta:
+        a.error("--captura needs --hasta")
+    if args.hasta and not args.captura and args.simular != "demo":
+        a.error("--hasta needs --simular demo")
+    return args
+
+
 def main() -> None:
-    inicial = (sys.argv[1] if len(sys.argv) > 1 else "G2B").upper()
-    app = QApplication(sys.argv)
+    args = argumentos()
+    if args.captura:
+        preparar_captura()
+    por_defecto = "L3" if args.captura else "G2B"
+    inicial = (args.variante or por_defecto).upper()
+    app = QApplication(sys.argv[:1])
     f = app.font()
+    if args.captura:
+        f.setFamily("Segoe UI")  # la de la ventana real en Windows
     f.setPointSize(PT)
     app.setFont(f)
     app.setStyleSheet(ESTILO)
     configurar_pyqtgraph()
-    v = Ventana(inicial if inicial in VARIANTES else "G2B")
+    demo = bool(args.captura) or args.simular == "demo"
+    v = Ventana(inicial if inicial in VARIANTES else por_defecto, demo=demo)
+    if args.captura:
+        capturar_demo(app, v, args.hasta, args.captura)
+        return
+    if args.hasta:
+        avanzar(v, args.hasta)
+        v.pausado = True  # en el instante, quieto: Espacio lo sigue
+        v.actualizar_titulo()
     v.resize(1366, 768)  # el mínimo de #4, en píxeles lógicos
     v.show()
     sys.exit(app.exec())
