@@ -95,7 +95,7 @@ y en gris en las demás (FALLA_SI_CERO).
                           CMD_ECHO; el par extra bajo los ecos, como en M1;
                           HUMIDITY y SERVO_CMD en una fila de Vuelo y GPS
 
-    Elegida: M4 (2026-11-16). Entra en 768 px con la consola abierta (765) y
+    Elegida: M4 (2026-11-16). Entra en 768 px con la consola abierta (ver #58) y
     el QR de LANDED queda entero. M1 pedía 784 px con la consola; M3 aplastaba
     el gráfico de altitud y pedía 882.
 
@@ -105,9 +105,9 @@ y en gris en las demás (FALLA_SI_CERO).
     gráfico deja un 3 % de aire en vez del 10 % y las marcas se separan según
     la altura de la letra; el Recorrido lleva la unidad en el título, «N ↑» y
     «E →» derechos dentro del mapa en vez de los rótulos de los ejes, y las
-    mismas marcas. Sigue en 765 px (768 en high contrast).
+    mismas marcas.
 
-    #58: esos 765 eran el mínimo, no lo que pide la ventana. En el peor caso
+    #58: los 765 px que se citaban eran el mínimo, no lo que pide la ventana. En el peor caso
     (consola abierta, LANDED, MODE en ámbar, EXTRA_ID = CAM_STATUS) pedía 790
     (793 en high contrast) y el layout aplastaba el Send y los combos de
     Telecommands. M4 le saca 28 px al aire de esa tarjeta: ahora pide 762
