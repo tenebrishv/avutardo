@@ -46,10 +46,9 @@ buck, calculado en la GCS paquete por paquete.
     Elegida: G2B (2026-11-15). Gráficos anchos y cada canal se lee entero;
     G2A dejaba los gráficos en unos 90 px por el ancho de las etiquetas.
 
-Ronda 6 (#24): dónde va la sección de enlace RF, sobre G2B. Las tres llevan un
-SUSTITUTO del panel de telecomandos de la #21 (combobox, parámetro, Send y los
-últimos ecos), sólo para que el alto de la columna derecha sea honesto; los
-conteos salen de la franja (cada dato una vez) y el pie sólo avisa LINK LOST.
+Ronda 6 (#24): dónde va la sección de enlace RF, sobre G2B. Las tres llevan el
+panel de telecomandos de la #21 (abajo); los conteos salen de la franja (cada
+dato una vez) y el pie sólo avisa LINK LOST.
 
     L1  Columna derecha  telecomandos, enlace (una fila por valor) y Recorrido
     L2  Franja           el enlace en una franja a lo ancho, bajo la de arriba
@@ -77,6 +76,19 @@ definido). A 14 pt cada paquete ocupa dos líneas.
     pie no le quita ancho a la franja. K3 muestra poco más de un paquete. Con
     la consola abierta, los gráficos bajan su mínimo de 140 a 100 px: si no,
     la ventana pide 790 px de alto.
+
+Telecomandos (#21), en las variantes de las rondas 6 y 7: un combobox con los
+19 de `telecomandos.toml` y, al lado, el parámetro que pide cada uno (lista de
+valores, número con su unidad y el rango del .toml, o nada; TIME_SET toma la
+hora de la notebook). Send pide confirmación a los que la llevan en el .toml.
+Debajo, los últimos tres con su estado: PENDING, ACK, REJECTED o NO ACK. La
+cola sigue la ADR 0003: de a uno, justo después de un recibido (o en el
+momento, con el enlace perdido), reintento con el mismo número si a los 3 s
+no está en el eco y NO ACK después del tercer intento; un rechazado no se
+reintenta. A bordo, de juguete, se valida contra el .toml y un número repetido
+se confirma sin volver a ejecutarse. Para verlo: SIMP en FLIGHT sale REJECTED,
+con F7 (enlace cortado) cualquiera termina NO ACK, y después de CX OFF los
+demás quedan NO ACK hasta que CX ON vuelve con ACK.
 
 Correr, desde `gcs/`:
 
@@ -136,6 +148,7 @@ import random
 import sys
 import tomllib
 from collections import deque
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -150,8 +163,10 @@ from PySide6.QtGui import (
     QPixmap,
     QShortcut,
     QTextOption,
+    QValidator,
 )
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QApplication,
     QComboBox,
     QFrame,
@@ -164,6 +179,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -317,6 +333,103 @@ def llego(sim: Simulador, instante: str) -> bool:
     return sim.t_aterrizaje is not None and sim.t - sim.t_aterrizaje >= 10
 
 
+# --- cola de telecomandos (#21, ADR 0003) ---------------------------------
+
+LOST_TRAS = 3  # s sin un recibido para LINK LOST (GLOSSARY: enlace perdido)
+ESPERA_ECO = 3  # s que la estación espera el eco antes de reintentar
+INTENTOS = 3  # el primero y dos reintentos; después, NO ACK
+
+
+@dataclass
+class Envio:
+    """Un telecomando de la estación terrena y lo que se sabe de él."""
+
+    numero: int  # el número de telecomando: un reintento lleva el mismo
+    nombre: str
+    parametro: str | int | None
+    estado: str = "PENDING"  # PENDING, ACK, REJECTED o NO ACK (GLOSSARY)
+    intentos: int = 0
+    t_envio: int = 0  # segundo de la notebook del último intento
+    por_mandar: bool = True
+
+
+class ColaTelecomandos:
+    """El lado de la estación de la ADR 0003, sin Qt: de a un telecomando por
+    vez, mandado justo después de un recibido (o en el momento, con el enlace
+    perdido); si a los ESPERA_ECO s su número no está en el eco, se reintenta,
+    y después de INTENTOS queda NO ACK. Un rechazado no se reintenta. Los que
+    esperan en la cola también se ven PENDING."""
+
+    def __init__(self) -> None:
+        self.entero = 0
+        self.cola: deque[Envio] = deque()
+        self.en_vuelo: Envio | None = None
+        self.historia: list[Envio] = []  # el más nuevo primero
+
+    def encolar(self, nombre: str, parametro: str | int | None) -> Envio:
+        self.entero = self.entero % 16383 + 1  # el contador CCSDS de 14 bits, sin el 0
+        envio = Envio(self.entero, nombre, parametro)
+        self.cola.append(envio)
+        self.historia.insert(0, envio)
+        del self.historia[20:]
+        return envio
+
+    def tic(self, reloj: int, enlace_perdido: bool) -> list[Envio]:
+        """Cada segundo: vence la espera del eco; con el enlace perdido, manda."""
+        e = self.en_vuelo
+        if e is not None and not e.por_mandar and reloj - e.t_envio >= ESPERA_ECO:
+            if e.intentos >= INTENTOS:
+                e.estado = "NO ACK"
+                self.en_vuelo = None
+            else:
+                e.por_mandar = True
+        return self._salientes(reloj) if enlace_perdido else []
+
+    def al_recibir(self, paquete: dict, reloj: int) -> list[Envio]:
+        """Con cada recibido: el eco confirma o rechaza el que está en vuelo, y
+        sale el que sigue (o el reintento)."""
+        e = self.en_vuelo
+        if e is not None and e.intentos and paquete.get("eco_id") == e.numero:
+            e.estado = "ACK" if paquete["resultado_comando"] == "ACCEPTED" else "REJECTED"
+            self.en_vuelo = None
+        return self._salientes(reloj)
+
+    def _salientes(self, reloj: int) -> list[Envio]:
+        if self.en_vuelo is None and self.cola:
+            self.en_vuelo = self.cola.popleft()
+        e = self.en_vuelo
+        if e is None or not e.por_mandar:
+            return []
+        e.intentos += 1
+        e.t_envio = reloj
+        e.por_mandar = False
+        return [e]
+
+
+def texto_parametro(nombre: str, parametro: str | int | None) -> str:
+    """El parámetro como se lee: el valor, el número con su unidad, o la hora
+    UTC de TIME_SET."""
+    definicion = COMANDOS.get(nombre, {})
+    if parametro is None:
+        return ""
+    if nombre == "TIME_SET" and isinstance(parametro, int):
+        return datetime.fromtimestamp(parametro, UTC).strftime("%H:%M:%S")
+    if isinstance(parametro, int) and definicion.get("unidad"):
+        return f"{agrupar(str(parametro))} {definicion['unidad']}"
+    return str(parametro)
+
+
+def texto_envio(nombre: str, parametro: str | int | None) -> str:
+    """El comando con su parámetro, como se lee en el panel y en la consola."""
+    return f"{nombre} {texto_parametro(nombre, parametro)}".rstrip()
+
+
+def pide_confirmacion(nombre: str, parametro: str | int | None) -> bool:
+    """`confirmar` del .toml: true, o la lista de valores que la piden."""
+    confirmar = COMANDOS.get(nombre, {}).get("confirmar", False)
+    return confirmar is True or (isinstance(confirmar, list) and parametro in confirmar)
+
+
 class Simulador:
     """Un vuelo tipo Prometeo a 1 Hz, con algún paquete perdido; con `demo`,
     el vuelo de demostración: semilla fija, sin pérdidas al azar y con las
@@ -341,6 +454,11 @@ class Simulador:
         self.extra_id = ""
         self.extra_valor = 0
         self.cortado = False
+        self.cortar_tras_paquete = False  # CX OFF: corta después del próximo paquete
+        self.modo = "FLIGHT"  # lo cambia SIM
+        # #21: la cola de la estación terrena, con los reintentos y el estado de
+        # cada envío. Vive acá y no en el panel, que se rehace con ← y →.
+        self.cola = ColaTelecomandos()
         self.offset_alt = 0.0
         self.alt_max = 0.0
         # La misión entera: el modo "Histórico" la necesita (son ~10 min a 1 Hz).
@@ -402,6 +520,9 @@ class Simulador:
         self.reloj += 1
         if self.demo and self.reloj in GUION_DEMO:
             self.telecomando(*GUION_DEMO[self.reloj])
+        # #21: los reintentos corren con el reloj de la notebook, llegue o no
+        # un paquete; con el enlace perdido, la estación manda en el momento.
+        self.mandar(self.cola.tic(self.reloj, self.enlace_perdido()))
         # #24: otro equipo transmite cada 4 s desde el despegue, y una vez llega
         # un paquete de otro largo. Los ajenos no tocan los otros conteos.
         tl = self.reloj - self.despegue
@@ -411,6 +532,18 @@ class Simulador:
             self.ajeno(48)
         if self.cortado:
             return
+        # CX OFF: el eco sale en un último paquete y después, silencio.
+        cortar, self.cortar_tras_paquete = self.cortar_tras_paquete, False
+        self.transmitir_paquete()
+        if cortar:
+            self.cortado = True
+
+    def enlace_perdido(self) -> bool:
+        """Sin recibidos todavía, o más de LOST_TRAS s sin uno (GLOSSARY)."""
+        return self.recibidos == 0 or self.reloj - self.ultimo_rx > LOST_TRAS
+
+    def transmitir_paquete(self) -> None:
+        """La FSW arma y manda el paquete del segundo; puede perderse en el aire."""
         if self.reinicio > 0:
             # La FSW está reiniciando: no transmite, pero el tiempo de misión
             # sigue (F2) y el contador no salta (F1), así que no hay perdidos.
@@ -444,7 +577,7 @@ class Simulador:
             "contador": self.contador,  # cabecera CCSDS, no es un campo
             # Operación
             "estado_fsw": estado,
-            "modo": "FLIGHT",
+            "modo": self.modo,
             "hora": self.hora().strftime("%H:%M:%S"),
             # Segundos enteros desde el comienzo de misión; antes, sin dato (.toml).
             "tiempo_mision": int(tv - EYECCION) if tv >= EYECCION else NAN,
@@ -532,6 +665,8 @@ class Simulador:
             self.snr = 10 - alt / 120 + r(0, 0.5)
         self.registro.append(",".join(fmt(c["nombre"], p[c["nombre"]]) for c in CAMPOS))
         self.anotar("rx", self.linea_puente(bytes_paquete(p, self.hora()), self.rssi, self.snr))
+        # #21: la estación lee el eco y manda justo después de un recibido.
+        self.mandar(self.cola.al_recibir(p, self.reloj))
 
     # --- consola de depuración (#22) ---
 
@@ -613,24 +748,49 @@ class Simulador:
                 return
             self.paso()
 
-    def telecomando(self, nombre: str, argumento: str = "") -> None:
-        """Llega un telecomando: vuelve como eco (número, código y resultado).
+    # --- telecomandos (#21, ADR 0003) ---
 
-        `nombre` es el de `telecomandos.toml` (CAL_ALT, CX…). De juguete: sólo
-        se rechaza un código desconocido o uno fuera de `solo_en_estado`.
-        """
+    def telecomando(self, nombre: str, argumento: str = "") -> None:
+        """La estación encola un telecomando escrito como texto («CX OFF»,
+        «TX_POWER 20»): el guion del vuelo de demostración y la línea de texto
+        de las variantes viejas. Sale cuando le toca, por la cola."""
         nombre = nombre.upper()
+        definicion = COMANDOS.get(nombre, {})
+        parametro: str | int | None = None
+        if "valores" in definicion:
+            parametro = argumento.upper()
+        elif argumento:
+            try:
+                parametro = int(argumento)
+            except ValueError:
+                parametro = argumento  # no se codifica y a bordo se rechaza
+        self.cola.encolar(nombre, parametro)
+
+    def mandar(self, envios: list[Envio]) -> None:
+        """La estación transmite: una línea TX en la consola por intento."""
+        for e in envios:
+            texto = texto_envio(e.nombre, e.parametro)
+            if e.intentos > 1:
+                texto += f"  (attempt {e.intentos} of {INTENTOS})"
+            try:
+                tc = vf.codificar_telecomando(FORMATO, FORMATO_TC, e.numero, e.nombre, e.parametro)
+                self.anotar("tx", f"{tc.hex().upper()}  {texto}")
+            except (KeyError, ValueError, AttributeError, OverflowError, TypeError):
+                self.anotar("tx", f"{texto}  (not encodable)")
+            self.recibir_telecomando(e.numero, e.nombre, e.parametro)
+
+    def recibir_telecomando(self, numero: int, nombre: str, parametro) -> None:
+        """A bordo: el telecomando llega y vuelve como eco en el paquete
+        siguiente (número, código y resultado). Un número repetido se confirma
+        sin volver a ejecutarse. De juguete: se valida contra el .toml, pero
+        sólo CAL_ALT, GET_SENSORS, CX y SIM tienen efecto."""
+        if self.enlace_caido or self.reinicio > 0:
+            return  # no llega: perdido en el aire, o la FSW está reiniciando
+        if numero == self.eco_id:
+            return  # repetido: el eco ya lo confirma
         comando = COMANDOS.get(nombre)
-        estado = self.ultimo.get("estado_fsw", "STANDBY")
-        aceptado = comando is not None and estado in comando.get("solo_en_estado", [estado])
-        self.eco_id += 1
-        try:
-            definicion = COMANDOS[nombre]
-            parametro = argumento.upper() if "valores" in definicion else int(argumento or 0)
-            tc = vf.codificar_telecomando(FORMATO, FORMATO_TC, self.eco_id, nombre, parametro)
-            self.anotar("tx", f"{tc.hex().upper()}  {nombre} {argumento}".rstrip())
-        except (KeyError, ValueError):
-            self.anotar("tx", f"{nombre} {argumento}  (not encodable)".rstrip())
+        aceptado = comando is not None and self.acepta(comando, parametro)
+        self.eco_id = numero
         self.eco_codigo = nombre if comando else f"?{nombre}"
         self.resultado_comando = "ACCEPTED" if aceptado else "REJECTED"
         if not aceptado:
@@ -639,9 +799,27 @@ class Simulador:
             self.offset_alt += self.ultimo.get("altitud", 0.0)
         if nombre == "GET_SENSORS":  # F4: responde por el par extra
             self.extra_id, self.extra_valor = nombre, 0b11111  # los cinco sensores
-        if nombre == "CX" and argumento.upper() == "OFF":
-            self.paso()  # el eco sale en un último paquete
-            self.cortado = True
+        if nombre == "CX":
+            self.cortar_tras_paquete = parametro == "OFF"
+            if parametro == "ON":
+                self.cortado = False  # se confirma con el primer paquete que vuelve
+        if nombre == "SIM":
+            self.modo = {"OFF": "FLIGHT", "PRESSURE": "SIM_PRESSURE", "FULL": "SIM_FULL"}[parametro]
+
+    def acepta(self, comando: dict, parametro) -> bool:
+        """Las reglas de rechazo de telecomandos.toml: estado, modo y rango."""
+        estado = self.ultimo.get("estado_fsw", "STANDBY")
+        if estado not in comando.get("solo_en_estado", [estado]):
+            return False
+        if self.modo not in comando.get("solo_en_modo", [self.modo]):
+            return False
+        if "valores" in comando:
+            return parametro in comando["valores"]
+        if "unidad" in comando:
+            if not isinstance(parametro, int):
+                return False
+            return comando.get("minimo", parametro) <= parametro <= comando.get("maximo", parametro)
+        return parametro in (None, 0)
 
 
 # --- piezas comunes -------------------------------------------------------
@@ -2162,7 +2340,6 @@ class VarianteG2C(VarianteG2):
 # --- ronda 6 (#24): la sección de enlace RF -------------------------------
 
 ANCHO_L3 = 260  # la columna derecha de L3: el Recorrido gana ancho
-LOST_TRAS = 3  # s sin un recibido para LINK LOST (GLOSSARY: enlace perdido)
 TX_POWER = con_unidad("potencia_tx")  # el único campo de la sección
 ORDEN_ENLACE = [
     "RSSI",
@@ -2305,17 +2482,44 @@ class FranjaSinConteos(Franja):
             valor.setText(fmt(clave, datos[clave]) if datos[clave] != "" else "—")
 
 
-def dialogo_confirmar(padre: QWidget, nombre: str) -> QMessageBox:
+def dialogo_confirmar(padre: QWidget, texto: str) -> QMessageBox:
     """El diálogo de un comando con confirmación; también sale en la captura."""
     botones = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-    return QMessageBox(QMessageBox.Icon.Question, "Confirm", f"Send {nombre}?", botones, padre)
+    return QMessageBox(QMessageBox.Icon.Question, "Confirm", f"Send {texto}?", botones, padre)
+
+
+class SpinMiles(QSpinBox):
+    """Un QSpinBox con los miles como en el resto de la pantalla: U+202F desde
+    4 dígitos (gcs-decisiones, Números en pantalla), no el separador del locale."""
+
+    def textFromValue(self, valor: int) -> str:  # noqa: N802 (nombre que impone Qt)
+        return agrupar(str(valor))
+
+    def valueFromText(self, texto: str) -> int:  # noqa: N802
+        limpio = texto.removesuffix(self.suffix()).replace(MILES, "")
+        try:
+            return int(limpio)
+        except ValueError:
+            return self.value()
+
+    def validate(self, texto: str, pos: int):
+        limpio = texto.removesuffix(self.suffix()).replace(MILES, "")
+        if limpio in ("", "-"):  # a medio escribir
+            return QValidator.State.Intermediate, texto, pos
+        valido = limpio.removeprefix("-").isdigit()
+        return (QValidator.State.Acceptable if valido else QValidator.State.Invalid), texto, pos
+
+
+COLOR_ESTADO = {"PENDING": "#8a5a0b", "ACK": "#145a32", "REJECTED": "#b03a2e", "NO ACK": "#b03a2e"}
+INT32 = (-(2**31), 2**31 - 1)  # el parámetro, cuando el .toml no da el rango
 
 
 class PanelComandosCombo(QWidget):
-    """SUSTITUTO de la #21, sólo por su alto: combobox, parámetro, Send y los
-    últimos ecos. Sin PENDING, reintentos ni NO ACK: eso es la #21."""
+    """#21: combobox con los telecomandos del .toml, el parámetro que pide cada
+    uno, Send y los últimos envíos con su estado. La cola y los reintentos
+    están en `sim.cola`: el panel sólo encola y muestra."""
 
-    CONFIRMAR = ("CX", "CAL_ALT", "SIM", "DESCENT2", "RESET_MISSION")
+    FILAS = 3  # las que entran en la columna de 260 px de L3 sin pedir alto
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__()
@@ -2326,40 +2530,98 @@ class PanelComandosCombo(QWidget):
         self.combo = QComboBox()
         self.combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.combo.addItems(list(COMANDOS))
+        self.combo.currentTextChanged.connect(self.cambiar)
         v.addWidget(self.combo)
+        # El parámetro cambia con el comando: lista, número con su unidad o nada.
         fila = QHBoxLayout()
-        self.param = QLineEdit()
-        self.param.setPlaceholderText("Param")
-        fila.addWidget(self.param, 1)
+        self.pila = QStackedWidget()
+        self.valores = QComboBox()
+        self.valores.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.entero = SpinMiles()
+        self.entero.setKeyboardTracking(False)
+        self.nada = label("")
+        self.nada.setStyleSheet("color: #555;")
+        for w in (self.valores, self.entero, self.nada):
+            # Sin esto, el QSpinBox pide el ancho de «-2147483648 Pa».
+            w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+            self.pila.addWidget(w)
+        self.pila.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        fila.addWidget(self.pila, 1)
         enviar = QPushButton("Send")
         enviar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         enviar.clicked.connect(self.mandar)
         fila.addWidget(enviar)
         v.addLayout(fila)
-        self.historia = [label("—") for _ in range(3)]
-        for lb in self.historia:
-            v.addWidget(lb)
-        self.ecos: list[str] = []
-        self.ultimo_eco = 0
+        self.filas: list[tuple[QLabel, QLabel]] = []
+        for _ in range(self.FILAS):
+            h = QHBoxLayout()
+            izq, der = label("—"), label("", negrita=True)
+            izq.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            h.addWidget(izq, 1)
+            h.addWidget(der)
+            v.addLayout(h)
+            self.filas.append((izq, der))
+        self.cambiar(self.combo.currentText())
+
+    def cambiar(self, nombre: str) -> None:
+        d = COMANDOS[nombre]
+        if "valores" in d:
+            self.valores.clear()
+            self.valores.addItems(d["valores"])
+            self.pila.setCurrentWidget(self.valores)
+        elif nombre == "TIME_SET":
+            self.nada.setText("Notebook clock")
+            self.pila.setCurrentWidget(self.nada)
+        elif "unidad" in d:
+            minimo, maximo = d.get("minimo", INT32[0]), d.get("maximo", INT32[1])
+            self.entero.setRange(minimo, maximo)
+            self.entero.setValue(max(minimo, min(0, maximo)))
+            self.entero.setSuffix(f" {d['unidad']}")
+            self.pila.setCurrentWidget(self.entero)
+        else:
+            self.nada.setText("No parameter")
+            self.pila.setCurrentWidget(self.nada)
+
+    def parametro(self, nombre: str) -> str | int | None:
+        d = COMANDOS[nombre]
+        if "valores" in d:
+            return self.valores.currentText()
+        if nombre == "TIME_SET":
+            return int(self.sim.hora().timestamp())
+        if "unidad" in d:
+            self.entero.interpretText()  # lo tipeado, aunque no se haya dado Enter
+            return self.entero.value()
+        return None
 
     def mandar(self) -> None:
         nombre = self.combo.currentText()
-        if nombre in self.CONFIRMAR:
-            caja = dialogo_confirmar(self, nombre)
+        parametro = self.parametro(nombre)
+        if pide_confirmacion(nombre, parametro):
+            caja = dialogo_confirmar(self, texto_envio(nombre, parametro))
             caja.exec()
             if caja.standardButton(caja.clickedButton()) != QMessageBox.StandardButton.Yes:
                 return
-        self.sim.telecomando(nombre, self.param.text())
-        self.param.clear()
+        self.sim.cola.encolar(nombre, parametro)
+        self.actualizar()
 
     def actualizar(self) -> None:
-        p = self.sim.ultimo
-        if p.get("eco_id", 0) != self.ultimo_eco:
-            self.ultimo_eco = p["eco_id"]
-            ack = "ACK" if p["resultado_comando"] == "ACCEPTED" else "REJECTED"
-            self.ecos.insert(0, f"#{p['eco_id']} {p['eco_codigo']} {ack}")
-        for lb, texto in zip(self.historia, self.ecos + ["—"] * 3, strict=False):
-            lb.setText(texto)
+        envios = self.sim.cola.historia[: self.FILAS]
+        for (izq, der), e in zip(self.filas, envios + [None] * self.FILAS, strict=False):
+            if e is None:
+                izq.setText("—")
+                izq.setToolTip("")
+                der.setText("")
+                continue
+            corto = f"#{e.numero} {e.nombre}"
+            texto = f"#{e.numero} {texto_envio(e.nombre, e.parametro)}"
+            # En 260 px no siempre entra todo: primero se cae el parámetro, y
+            # sólo después se corta el nombre. El texto entero, en el tooltip.
+            m, ancho = izq.fontMetrics(), max(izq.width(), 40)
+            visible = texto if m.horizontalAdvance(texto) <= ancho else corto
+            izq.setText(m.elidedText(visible, Qt.TextElideMode.ElideRight, ancho))
+            izq.setToolTip(texto)
+            der.setText(e.estado)
+            der.setStyleSheet(f"color: {COLOR_ESTADO[e.estado]};")
 
 
 class VarianteEnlace(VarianteG2B):
@@ -2613,6 +2875,12 @@ class Selector(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
 
+def escribiendo() -> bool:
+    """Si el foco está en un campo de texto o numérico: las teclas sueltas
+    (Espacio, 1 a 5, ← y →) son de ese campo, no de la simulación."""
+    return isinstance(QApplication.focusWidget(), (QLineEdit, QAbstractSpinBox))
+
+
 class Ventana(QMainWindow):
     def __init__(self, inicial: str, demo: bool = False) -> None:
         super().__init__()
@@ -2687,7 +2955,7 @@ class Ventana(QMainWindow):
         self.avisar("Flight restarted")
 
     def pausar(self) -> None:
-        if isinstance(QApplication.focusWidget(), QLineEdit):
+        if escribiendo():
             return
         self.pausado = not self.pausado
         self.actualizar_titulo()
@@ -2700,7 +2968,7 @@ class Ventana(QMainWindow):
 
     def saltar(self, fase: str) -> None:
         """1 a 5: hacia adelante corre el vuelo; hacia atrás, lo reinicia antes."""
-        if isinstance(QApplication.focusWidget(), QLineEdit):
+        if escribiendo():
             return
         actual = FASES.index(self.sim._perfil(self.sim.t - self.sim.despegue)[1])
         if FASES.index(fase) < actual or self.sim.cortado:
@@ -2753,7 +3021,7 @@ class Ventana(QMainWindow):
         self.poner(self.claves[i])
 
     def flecha(self, paso: int) -> None:
-        if isinstance(QApplication.focusWidget(), QLineEdit):
+        if escribiendo():
             return
         self.ciclar(paso)
 
@@ -2807,7 +3075,7 @@ class Ventana(QMainWindow):
 
 ESTILO = (
     "QWidget { background: white; color: black; }"
-    "QTableWidget, QHeaderView, QPushButton, QLineEdit { font-size: 14pt; }"
+    "QTableWidget, QHeaderView, QPushButton, QLineEdit, QSpinBox { font-size: 14pt; }"
     "QTableWidget::item { padding: 0px 4px; }"
     "QPushButton { border: 2px solid #555; padding: 4px 10px; }"
     "QHeaderView::section { font-weight: bold; background: #eee; }"
