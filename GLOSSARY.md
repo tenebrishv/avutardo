@@ -113,6 +113,23 @@ La estación terrena lleva más de 3 s sin un recibido. Un perdido suelto no
 alcanza: el enlace sigue activo.
 _Evitar_: sin señal, desconectado
 
+## Energía
+
+**Batería**:
+El pack 2S que alimenta al CanSat; sus tensión y corriente son las que pide
+G7. Una corriente positiva es descarga.
+_Evitar_: pack, pila
+
+**Barra de 3.3 V**:
+La salida del buck, de la que cuelga todo lo que va a bordo (salvo la baliza).
+_Evitar_: bus, riel, salida del DC-DC
+
+**Rendimiento del buck**:
+La potencia de la barra de 3.3 V dividida por la de la batería, paquete por
+paquete. Un valor de más del 100 % no se corrige: indica un problema de
+medición.
+_Evitar_: rendimiento del DC-DC, rendimiento del EPS, eficiencia
+
 ## Software de vuelo
 
 **Software de vuelo (FSW)**:

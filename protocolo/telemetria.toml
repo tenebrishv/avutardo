@@ -133,6 +133,9 @@ requisito = ""
 descripcion = "Humedad relativa (BME280)"
 
 # --- Energía (INA3221) -------------------------------------------------------
+# Corriente positiva = consumo: la que va de la fuente a la carga. La batería
+# es positiva cuando se descarga, la barra de 3.3 V cuando alimenta lo de a
+# bordo y el panel cuando entrega corriente a su carga.
 
 [[campo]]
 nombre = "tension_bateria"
