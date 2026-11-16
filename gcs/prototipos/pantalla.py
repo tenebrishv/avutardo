@@ -313,6 +313,7 @@ SEMILLA_DEMO = 8
 HORA_DEMO = datetime(2026, 11, 17, 15, 0, tzinfo=UTC)  # hora UTC al arrancar
 EYECCION = 12  # s desde el despegue: comienzo de misión (X3)
 GUION_DEMO = {  # segundo de la notebook → telecomando, mandado en STANDBY
+    5: ("GET_SENSORS", ""),  # F4: así el par extra tiene dato todo el vuelo (#26)
     10: ("TIME_SET", str(int(HORA_DEMO.timestamp()) + 10)),
     15: ("CAL_ALT", ""),
 }
