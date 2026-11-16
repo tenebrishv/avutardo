@@ -49,6 +49,9 @@
 #  - Desde el primer telecomando real, los comandos nuevos van siempre AL FINAL
 #    y la versión sube en 1. La versión es independiente de la de la
 #    telemetría.
+#  - Los nombres (de comandos, valores y bits) no viajan en el binario:
+#    renombrar no cambia la versión. Van en inglés, porque la pantalla de la
+#    GCS los muestra tal cual (#52).
 #  - RESET_MISSION no borra el último número de telecomando: la numeración es
 #    de la estación terrena, que la sigue desde su registro.
 # ============================================================================
@@ -193,10 +196,10 @@ descripcion = "Anulación manual de la cámara 2: la FSW la arranca sola en el c
 nombre = "CAM_STATUS"
 grupo = "consultas"
 requisito = "F4"
-descripcion = "Estado de las dos cámaras"
+descripcion = "Estado de las dos cámaras: si graba (rec) y si a su microSD le queda lugar (sd)"
 [comando.respuesta]
 forma = "bits"
-bits = ["cam1_grabando", "cam1_sd_con_lugar", "cam2_grabando", "cam2_sd_con_lugar"]
+bits = ["cam1_rec", "cam1_sd", "cam2_rec", "cam2_sd"]
 
 [[comando]]
 nombre = "GET_SENSORS"
@@ -211,10 +214,10 @@ bits = ["ds3231", "bme280", "ina3221", "gps_l76k", "lsm6dso32"]
 nombre = "TIME_STATUS"
 grupo = "consultas"
 requisito = "F4"
-descripcion = "De dónde salió la hora del RTC; vuelve a SIN_HORA si el RTC la pierde"
+descripcion = "De dónde salió la hora del RTC; vuelve a NO_TIME si el RTC la pierde"
 [comando.respuesta]
 forma = "valores"
-valores = ["SIN_HORA", "TIME_SET", "TIME_SYNC"]
+valores = ["NO_TIME", "TIME_SET", "TIME_SYNC"]
 
 [[comando]]
 nombre = "GET_P0"
