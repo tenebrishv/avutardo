@@ -46,11 +46,26 @@ buck, calculado en la GCS paquete por paquete.
     Elegida: G2B (2026-11-15). Gráficos anchos y cada canal se lee entero;
     G2A dejaba los gráficos en unos 90 px por el ancho de las etiquetas.
 
+Ronda 6 (#24): dónde va la sección de enlace RF, sobre G2B. Las tres llevan un
+SUSTITUTO del panel de telecomandos de la #21 (combobox, parámetro, Send y los
+últimos ecos), sólo para que el alto de la columna derecha sea honesto; los
+conteos salen de la franja (cada dato una vez) y el pie sólo avisa LINK LOST.
+
+    L1  Columna derecha  telecomandos, enlace (una fila por valor) y Recorrido
+    L2  Franja           el enlace en una franja a lo ancho, bajo la de arriba
+    L3  Celda de grilla  el enlace bajo Vuelo y GPS, en dos columnas de pares
+
+    Elegida: L3 (2026-11-16), con el enlace del alto justo de sus números y la
+    columna derecha en 260 px para agrandar el Recorrido. L1 no entra en 768 px
+    de alto aun con el Recorrido aplastado; L2 entra con 2 px y se pasa del
+    ancho cuando los conteos llegan a cuatro cifras.
+
 Correr, desde `gcs/`:
 
     uv run python prototipos/pantalla.py        # arranca en G2B, la elegida
     uv run python prototipos/pantalla.py A      # arranca en A
     uv run python prototipos/pantalla.py G2A    # la ronda 5 (#23)
+    uv run python prototipos/pantalla.py L1     # la ronda 6 (#24)
 
 Teclas: ← y → cambian de variante, F11 alterna pantalla completa, F12 guarda
 una captura al doble de píxeles en `prototipos/capturas/` (como pide #4, Q6).
@@ -60,11 +75,15 @@ F8 adelanta 30 s de vuelo (para llegar al aterrizaje y ver el QR de G).
 Para probar la simulación:
 
     F5        reinicia el vuelo desde STANDBY
+    Shift+F5  arranque en frío: la estación abre sin paquetes (NO LINK) y la
+              FSW tarda 10 s en transmitir (sólo L1 a L3 lo dibujan)
     Espacio   pausa y reanuda
     F9        velocidad ×1 → ×5 → ×10
     1 a 5     salta a STANDBY, ASCENT, DESCENT_1, DESCENT_2 o LANDED
     F1        ráfaga de 5 paquetes perdidos
     F2        el próximo paquete llega con el CRC roto (descartado y perdido)
+    Shift+F2  llega un paquete de otro equipo (ajeno)
+    Shift+F7  señal débil (SNR negativa, para ver el noise floor) / normal
     F3        GPS sin fix (0 satélites, posición sin dato) / con fix
     F4        batería baja (1.5 V menos) / normal
     Shift+F4  BAT_CURRENT sin dato / con dato (hueco en la curva, "—" en el
@@ -120,6 +139,7 @@ PT = 14  # G12: letra de 14 pt o más, en toda la pantalla
 TRAZO = 3  # G12: trazos en negrita
 HISTORIA = 120  # segundos que muestra cada gráfico
 
+NAN = float("nan")
 COLORES = {"x": "#c0392b", "y": "#1e8449", "z": "#1f4e9c", "uno": "#1f4e9c", "dos": "#b9770e"}
 
 # --- formato --------------------------------------------------------------
@@ -159,7 +179,7 @@ def con_unidad(nombre: str) -> str:
 class Simulador:
     """Un vuelo tipo Prometeo a 1 Hz, con algún paquete perdido."""
 
-    def __init__(self) -> None:
+    def __init__(self, precarga: bool = True) -> None:
         self.t = 0.0
         self.contador = 0
         self.recibidos = 0
@@ -187,8 +207,10 @@ class Simulador:
         self.t_cambio = 0.0  # cuándo cambió el estado por última vez (para G)
         self.deriva = 0.0  # segundos de deriva con el viento: sólo en vuelo
         self.vel_vertical = 0.0
-        self.rssi = -70.0
-        self.snr = 9.0
+        self.rssi = NAN  # sólo cambian con un recibido (#24, Q2)
+        self.snr = NAN
+        self.ajenos = 0  # #24: paquetes de otros equipos (otro APID u otro largo)
+        self.senal_debil = False  # #24: SNR negativa, para ver el noise floor
         self.ultimo: dict = {}
         self.registro: deque[str] = deque(maxlen=200)
         # Fallas que se disparan con el teclado (ver el encabezado).
@@ -207,7 +229,7 @@ class Simulador:
         self.boot = False  # el próximo paquete sale en BOOT
         # Arranca con 40 s en la rampa y el lanzamiento a los 45 s, para que los
         # gráficos no estén vacíos al abrir.
-        for _ in range(40):
+        for _ in range(40 if precarga else 0):
             self.paso()
 
     def _perfil(self, tv: float) -> tuple[float, str]:
@@ -224,6 +246,13 @@ class Simulador:
 
     def paso(self) -> None:
         self.reloj += 1
+        # #24: otro equipo transmite cada 4 s desde el despegue, y una vez llega
+        # un paquete de otro largo. Los ajenos no tocan los otros conteos.
+        tl = self.reloj - 45
+        if tl >= 0 and tl % 4 == 0:
+            self.ajenos += 1
+        if tl == 21:
+            self.ajenos += 1
         if self.cortado:
             return
         if self.reinicio > 0:
@@ -325,8 +354,12 @@ class Simulador:
             den = sum((t - mt) ** 2 for t in ts)
             self.vel_vertical = sum((t - mt) * (h - mh) for t, h in zip(ts, hs, strict=True)) / den
         # RSSI y SNR: los agregaría la Heltec de tierra; acá, de juguete.
-        self.rssi = -68 - alt / 25 + r(0, 1.5)
-        self.snr = 10 - alt / 120 + r(0, 0.5)
+        if self.senal_debil:  # por debajo del ruido: LoRa todavía recibe
+            self.rssi = -118 + r(0, 1)
+            self.snr = -8 + r(0, 0.5)
+        else:
+            self.rssi = -68 - alt / 25 + r(0, 1.5)
+            self.snr = 10 - alt / 120 + r(0, 0.5)
         self.registro.append(",".join(fmt(c["nombre"], p[c["nombre"]]) for c in CAMPOS))
 
     def _energia(self, estado: str, rot_z: float) -> dict:
@@ -1049,12 +1082,13 @@ class Hibrido(QWidget):
     gps_en_vuelo = False
     con_estado = True
     clase_tarjeta = TarjetaH
+    clase_franja = Franja
     columnas_xyz = 3
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__()
         self.sim = sim
-        self.franja = Franja(self.con_estado)
+        self.franja = self.clase_franja(self.con_estado)
         self.modo_global = "vivo"
         self.franja.toggle.clicked.connect(self.alternar_global)
         gps = ["gps_latitud", "gps_longitud", "gps_altitud", "gps_satelites"]
@@ -1491,7 +1525,7 @@ class VarianteG(Hibrido):
         cv = QVBoxLayout(caja)
         cv.setContentsMargins(4, 4, 4, 4)
         cv.addWidget(label("Telecomandos", negrita=True, pt=PT + 2))
-        self.comandos = PanelComandos(sim, vertical=True, mostrar_eco=False)
+        self.comandos = self.panel_comandos(sim)
         cv.addWidget(self.comandos)
         columna.addWidget(caja)
         contenedor = QWidget()
@@ -1512,6 +1546,9 @@ class VarianteG(Hibrido):
             self.pie.append(lb)
             ph.addWidget(lb, 1)
         raiz.addWidget(pie)
+
+    def panel_comandos(self, sim: Simulador) -> QWidget:
+        return PanelComandos(sim, vertical=True, mostrar_eco=False)
 
     def actualizar(self) -> None:
         super().actualizar()
@@ -1601,7 +1638,6 @@ class VarianteG3(VarianteG):
 
 # --- ronda 5 (#23): el bloque de energía ----------------------------------
 
-NAN = float("nan")
 TENSIONES = ["tension_bateria", "tension_3v3"]
 CORRIENTES = ["corriente_bateria", "corriente_3v3"]
 CANALES = [  # (tensión, corriente) de cada canal del INA3221
@@ -1927,6 +1963,283 @@ class VarianteG2C(VarianteG2):
         return EnergiaNumeros()
 
 
+# --- ronda 6 (#24): la sección de enlace RF -------------------------------
+
+ANCHO_L3 = 260  # la columna derecha de L3: el Recorrido gana ancho
+LOST_TRAS = 3  # s sin un recibido para LINK LOST (GLOSSARY: enlace perdido)
+ORDEN_ENLACE = [
+    "RSSI",
+    "SNR",
+    "Noise floor (est.)",
+    "PER",
+    "TX power",
+    "Received",
+    "Transmitted",
+    "Lost",
+    "Discarded",
+    "Foreign",
+]
+EN_ROJO = ("Lost", "Discarded")  # en rojo si no son cero, como en la franja
+MAS_ANCHO = {  # el valor más ancho de cada uno: así la franja no salta
+    "RSSI": "-120 dBm",
+    "SNR": "-20.0 dB",
+    "Noise floor (est.)": "-120 dBm",
+    "PER": "99.9 %",
+    "TX power": "22 dBm",
+}
+
+
+def estado_enlace(sim: Simulador) -> tuple[str, str]:
+    """(texto, nivel): NO LINK antes del primer recibido (Q3), después LINK OK
+    o LINK LOST con los segundos desde el último recibido."""
+    if sim.recibidos == 0:
+        return "NO LINK", "nada"
+    sin_rx = sim.reloj - sim.ultimo_rx
+    if sin_rx > LOST_TRAS:
+        return f"LINK LOST {sin_rx} s", "error"
+    return "LINK OK", "ok"
+
+
+def noise_floor(rssi: float, snr: float) -> float:
+    """En potencia, para que valga también con la SNR negativa (#24, Q1):
+    el RSSI mide señal + ruido, así que N = RSSI - 10·log10(1 + 10^(SNR/10))."""
+    return rssi - 10 * math.log10(1 + 10 ** (snr / 10))
+
+
+def valores_enlace(sim: Simulador) -> dict[str, str]:
+    """Los diez valores de la sección, ya con formato (#24, Q6). El RSSI y el SNR
+    son los del último recibido (Q2); sin recibidos, "—" (Q3)."""
+    hay = sim.recibidos > 0
+    transmitidos = sim.recibidos + sim.perdidos
+    potencia = sim.ultimo.get("potencia_tx") if hay else None
+    return {
+        "RSSI": f"{sim.rssi:.0f} dBm" if hay else "—",
+        "SNR": f"{sim.snr:.1f} dB" if hay else "—",
+        "Noise floor (est.)": f"{noise_floor(sim.rssi, sim.snr):.0f} dBm" if hay else "—",
+        "PER": f"{100 * sim.perdidos / transmitidos:.1f} %" if hay else "—",
+        "TX power": f"{potencia} dBm" if potencia is not None else "—",
+        "Received": fmt("", sim.recibidos),
+        "Transmitted": fmt("", transmitidos) if hay else "—",
+        "Lost": fmt("", sim.perdidos),
+        "Discarded": fmt("", sim.descartados),
+        "Foreign": fmt("", sim.ajenos),
+    }
+
+
+class TarjetaEnlace(QFrame):
+    """La sección de enlace, toda en números. `forma`:
+
+    columna  una fila por valor (para los 230 px de la columna derecha)
+    grilla   dos columnas de pares (una celda de la grilla)
+    linea    una sola fila, sin título (una franja a lo ancho)
+    """
+
+    def __init__(self, forma: str) -> None:
+        super().__init__()
+        self.setObjectName("tarjeta")
+        self.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        self.estado = label("NO LINK", negrita=True, alinear=Qt.AlignmentFlag.AlignCenter)
+        self.valores: dict[str, QLabel] = {}
+        derecha = Qt.AlignmentFlag.AlignRight
+        if forma == "linea":
+            h = QHBoxLayout(self)
+            h.setContentsMargins(6, 2, 6, 2)
+            h.setSpacing(4)
+            self.estado.setMinimumWidth(150)
+            h.addWidget(self.estado)
+            for nombre in ORDEN_ENLACE:
+                corto = "Noise (est.)" if nombre.startswith("Noise") else nombre
+                lb = label(corto)
+                lb.setToolTip(nombre)
+                h.addWidget(lb)
+                val = label("—", negrita=True)
+                if nombre in MAS_ANCHO:  # los conteos crecen de a poco: sin fijar
+                    val.setFixedWidth(val.fontMetrics().horizontalAdvance(MAS_ANCHO[nombre]) + 2)
+                self.valores[nombre] = val
+                h.addWidget(val)
+                h.addStretch(1)
+            return
+        v = QVBoxLayout(self)
+        v.setContentsMargins(6, 4, 6, 4)
+        v.setSpacing(2)
+        cab = QHBoxLayout()
+        cab.addWidget(label("RF link", negrita=True, pt=PT + 2))
+        cab.addStretch(1)
+        cab.addWidget(self.estado)
+        v.addLayout(cab)
+        grilla = QGridLayout()
+        grilla.setHorizontalSpacing(10)
+        grilla.setVerticalSpacing(0)
+        por_col = len(ORDEN_ENLACE) if forma == "columna" else 5
+        for i, nombre in enumerate(ORDEN_ENLACE):
+            f, c = i % por_col, (i // por_col) * 2
+            # En los 230 px de la columna no entra el nombre entero.
+            corto = "Noise (est.)" if forma == "columna" and nombre.startswith("Noise") else nombre
+            lb = label(corto)
+            lb.setToolTip(nombre)
+            grilla.addWidget(lb, f, c)
+            self.valores[nombre] = label("—", negrita=True, alinear=derecha)
+            grilla.addWidget(self.valores[nombre], f, c + 1)
+        v.addLayout(grilla)
+        v.addStretch(1)
+
+    def poner_modo(self, modo) -> None:
+        pass  # sin gráfico: no tiene ventana
+
+    def actualizar(self, sim: Simulador, datos: dict | None = None) -> None:
+        texto, nivel = estado_enlace(sim)
+        self.estado.setText(texto)
+        self.estado.setStyleSheet(NIVEL[nivel] + "padding: 0px 8px;")
+        for nombre, texto in valores_enlace(sim).items():
+            lb = self.valores[nombre]
+            lb.setText(texto)
+            rojo = nombre in EN_ROJO and texto not in ("0", "—")
+            lb.setStyleSheet("color: #b03a2e" if rojo else "")
+
+
+class FranjaSinConteos(Franja):
+    """La franja sin recibidos, perdidos ni descartados: pasan a la sección de
+    enlace (cada dato una vez, ronda 2)."""
+
+    CLAVES = [(c, t) for c, t in Franja.CLAVES if c not in ("recibidos", "perdidos", "descartados")]
+
+    def actualizar(self, datos: dict) -> None:
+        for clave, valor in self.ind.items():
+            valor.setText(fmt(clave, datos[clave]) if datos[clave] != "" else "—")
+
+
+class PanelComandosCombo(QWidget):
+    """SUSTITUTO de la #21, sólo por su alto: combobox, parámetro, Send y los
+    últimos ecos. Sin PENDING, reintentos ni NO ACK: eso es la #21."""
+
+    CONFIRMAR = ("CX", "CAL_ALT", "SIM", "DESCENT2", "RESET_MISSION")
+
+    def __init__(self, sim: Simulador) -> None:
+        super().__init__()
+        self.sim = sim
+        v = QVBoxLayout(self)
+        v.setContentsMargins(4, 4, 4, 4)
+        v.setSpacing(4)
+        self.combo = QComboBox()
+        self.combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.combo.addItems(list(COMANDOS))
+        v.addWidget(self.combo)
+        fila = QHBoxLayout()
+        self.param = QLineEdit()
+        self.param.setPlaceholderText("Param")
+        fila.addWidget(self.param, 1)
+        enviar = QPushButton("Send")
+        enviar.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        enviar.clicked.connect(self.mandar)
+        fila.addWidget(enviar)
+        v.addLayout(fila)
+        self.historia = [label("—") for _ in range(3)]
+        for lb in self.historia:
+            v.addWidget(lb)
+        self.ecos: list[str] = []
+        self.ultimo_eco = 0
+
+    def mandar(self) -> None:
+        nombre = self.combo.currentText()
+        if nombre in self.CONFIRMAR:
+            r = QMessageBox.question(self, "Confirm", f"Send {nombre}?")
+            if r != QMessageBox.StandardButton.Yes:
+                return
+        self.sim.telecomando(nombre, self.param.text())
+        self.param.clear()
+
+    def actualizar(self) -> None:
+        p = self.sim.ultimo
+        if p.get("eco_id", 0) != self.ultimo_eco:
+            self.ultimo_eco = p["eco_id"]
+            ack = "ACK" if p["resultado_comando"] == "ACCEPTED" else "REJECTED"
+            self.ecos.insert(0, f"#{p['eco_id']} {p['eco_codigo']} {ack}")
+        for lb, texto in zip(self.historia, self.ecos + ["—"] * 3, strict=False):
+            lb.setText(texto)
+
+
+class VarianteEnlace(VarianteG2B):
+    """Lo común de la ronda 6: G2B con el panel de comandos de la #21, la
+    sección de enlace y el pie que sólo avisa LINK LOST (#24, Q5)."""
+
+    clase_franja = FranjaSinConteos
+    sin_paquetes = True  # se dibuja aunque no haya llegado nada (NO LINK)
+
+    def panel_comandos(self, sim: Simulador) -> QWidget:
+        return PanelComandosCombo(sim)
+
+    def actualizar(self) -> None:
+        if not self.sim.ultimo:  # arranque en frío: sólo el enlace y el pie
+            self.t["enlace"].actualizar(self.sim)
+            self.actualizar_avisos(estado_gcs(self.sim, self))
+            return
+        super().actualizar()
+
+    def actualizar_avisos(self, condiciones) -> None:
+        texto, nivel = estado_enlace(self.sim)
+        condiciones = list(condiciones)
+        condiciones[0] = ("Enlace", texto, "error") if nivel == "error" else None
+        colores = {"ok": "#145a32", "aviso": "#8a5a0b", "error": "#b03a2e"}
+        for lb, cond in zip(self.pie, condiciones, strict=True):
+            if cond is None:  # el enlace sano no se repite en el pie
+                lb.setText("")
+                lb.setStyleSheet("")
+                continue
+            titulo, texto, nivel = cond
+            marca = "●" if nivel == "ok" else "▲"
+            lb.setText(
+                f"<span style='color:{colores[nivel]}'>{marca}</span> {titulo}: <b>{texto}</b>"
+            )
+            lb.setStyleSheet(
+                "background: #b03a2e; color: white;" if nivel == "error" else "color: black;"
+            )
+
+
+class VarianteL1(VarianteEnlace):
+    nombre = "Ronda 6 (#24): enlace en la columna derecha"
+
+    def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
+        self.t["enlace"] = TarjetaEnlace("columna")
+        super().ubicar(g, columna)  # G2: el Recorrido al fondo de la columna
+        columna.insertWidget(1, self.t["enlace"])
+        self.t["recorrido"].plot.setMinimumHeight(40)  # lo que queda, para el mapa
+
+
+class VarianteL2(VarianteEnlace):
+    nombre = "Ronda 6 (#24): enlace como franja"
+
+    def __init__(self, sim: Simulador) -> None:
+        super().__init__(sim)
+        self.layout().insertWidget(1, self.t["enlace"])
+
+    def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
+        self.t["enlace"] = TarjetaEnlace("linea")
+        super().ubicar(g, columna)
+
+
+class VarianteL3(VarianteEnlace):
+    nombre = "Ronda 6 (#24): enlace bajo Vuelo y GPS"
+    ancho_comandos = ANCHO_L3
+
+    def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
+        # El enlace abajo, con el alto justo de sus números; Vuelo y GPS se queda
+        # con el resto. Energía, aceleración y rotación, como en G2.
+        self.t["enlace"] = TarjetaEnlace("grilla")
+        self.t["enlace"].setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        izq = QVBoxLayout()
+        izq.setSpacing(4)
+        izq.addWidget(self.t["vuelo"], 1)
+        izq.addWidget(self.t["enlace"])
+        g.addLayout(izq, 0, 0, 2, 1)
+        g.addWidget(self.t["energia"], 0, 1, 1, 2)
+        g.addWidget(self.t["acel"], 1, 1)
+        g.addWidget(self.t["rot"], 1, 2)
+        g.setColumnStretch(0, 4)
+        g.setColumnStretch(1, 3)
+        g.setColumnStretch(2, 3)
+        columna.addWidget(self.t["recorrido"], 1)
+
+
 # --- ventana y selector de variante ---------------------------------------
 
 VARIANTES = {
@@ -1942,6 +2255,9 @@ VARIANTES = {
     "G2A": VarianteG2A,
     "G2B": VarianteG2B,
     "G2C": VarianteG2C,
+    "L1": VarianteL1,
+    "L2": VarianteL2,
+    "L3": VarianteL3,
 }
 
 
@@ -2003,6 +2319,9 @@ class Ventana(QMainWindow):
             Qt.Key.Key_F3: lambda: self.falla("gps"),
             Qt.Key.Key_F4: lambda: self.falla("bateria"),
             "Shift+F4": lambda: self.falla("ina"),
+            "Shift+F2": lambda: self.falla("ajeno"),
+            "Shift+F7": lambda: self.falla("debil"),
+            "Shift+F5": self.arranque_en_frio,
             Qt.Key.Key_F10: lambda: self.falla("reinicio"),
         }
         for i, fase in enumerate(FASES):
@@ -2018,6 +2337,18 @@ class Ventana(QMainWindow):
 
     def avisar(self, texto: str) -> None:
         self.statusBar().showMessage(texto, 3000)
+
+    def arranque_en_frio(self) -> None:
+        """Shift+F5: la estación abre sin paquetes y la FSW tarda 10 s (#24, Q3)."""
+        self.sim = Simulador(precarga=False)
+        self.sim.reinicio = 10
+        self.poner(self.actual)
+        self.avisar("Arranque en frío: 10 s sin paquetes")
+
+    def refrescar(self) -> None:
+        """Las variantes viejas necesitan un paquete; las de la ronda 6, no."""
+        if self.sim.ultimo or getattr(self.vista, "sin_paquetes", False):
+            self.vista.actualizar()
 
     def reiniciar(self) -> None:
         """F5: un vuelo nuevo desde STANDBY, en la misma variante."""
@@ -2046,7 +2377,7 @@ class Ventana(QMainWindow):
             self.sim = Simulador()
             self.poner(self.actual)
         self.sim.saltar(fase)
-        self.vista.actualizar()
+        self.refrescar()
         self.avisar(f"Salto a {fase}")
 
     def falla(self, que: str) -> None:
@@ -2066,6 +2397,12 @@ class Ventana(QMainWindow):
         elif que == "ina":
             s.ina_sin_dato = not s.ina_sin_dato
             texto = "BAT_CURRENT sin dato" if s.ina_sin_dato else "BAT_CURRENT con dato"
+        elif que == "ajeno":
+            s.ajenos += 1
+            texto = "Llegó un paquete de otro equipo"
+        elif que == "debil":
+            s.senal_debil = not s.senal_debil
+            texto = "Señal débil (SNR negativa)" if s.senal_debil else "Señal normal"
         else:
             s.reinicio = 3
             texto = "Reinicio de la FSW: 3 s sin transmitir"
@@ -2075,7 +2412,7 @@ class Ventana(QMainWindow):
         self.actual = clave
         self.vista = VARIANTES[clave](self.sim)
         self.setCentralWidget(self.vista)
-        self.vista.actualizar()
+        self.refrescar()
         self.selector.texto.setText(f"{clave} ({self.vista.nombre})")
         self.selector.adjustSize()
         self.selector.raise_()
@@ -2095,20 +2432,20 @@ class Ventana(QMainWindow):
             self.sim.pendrive = not self.sim.pendrive
         else:
             self.sim.enlace_caido = not self.sim.enlace_caido
-        self.vista.actualizar()
+        self.refrescar()
 
     def adelantar(self) -> None:
         """F8: 30 s de vuelo de golpe, para llegar al aterrizaje sin esperar."""
         for _ in range(30):
             self.sim.paso()
-        self.vista.actualizar()
+        self.refrescar()
 
     def tick(self) -> None:
         if self.pausado:
             return
         for _ in range(self.velocidad):
             self.sim.paso()
-        self.vista.actualizar()
+        self.refrescar()
 
     def alternar_completa(self) -> None:
         self.showNormal() if self.isFullScreen() else self.showFullScreen()
