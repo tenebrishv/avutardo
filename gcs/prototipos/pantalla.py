@@ -112,6 +112,15 @@ se confirma sin volver a ejecutarse. Para verlo: SIMP en FLIGHT sale REJECTED,
 con F7 (enlace cortado) cualquiera termina NO ACK, y después de CX OFF los
 demás quedan NO ACK hasta que CX ON vuelve con ACK.
 
+Temas (#20): un combo al final del pie (de G en adelante) elige el tema.
+light es la paleta de siempre y la de las capturas; dark aclara los colores
+sobre fondo oscuro; high contrast es al estilo de Windows (fondo negro, texto
+y bordes blancos, curvas en amarillo y cian) con trazos de 5 px, ejes y bordes
+de 3 px y la grilla más marcada.
+
+Cambiar de tema rearma la variante sin cortar el vuelo. El QR queda negro sobre blanco en los
+tres, y la pastilla del selector de variante no cambia (no es del diseño).
+
 Correr, desde `gcs/`:
 
     uv run python prototipos/pantalla.py        # arranca en M4, la elegida
@@ -151,6 +160,7 @@ corrida, con los instantes `standby`, `descenso` y `aterrizado`.
     uv run python prototipos/pantalla.py --simular demo --hasta descenso
     uv run --with segno python prototipos/pantalla.py --captura salida.png --hasta aterrizado
     uv run python prototipos/pantalla.py --captura salida.png --hasta consola
+    uv run python prototipos/pantalla.py --tema dark --captura oscura.png --hasta descenso
 
 --captura corre fuera de pantalla (1366×768 lógicos con escala 2, según
 `pantalla-captura.json`), graba el PNG a 2732×1536 y sale; en `standby` graba
@@ -216,11 +226,160 @@ TOML_TC = RAIZ / "protocolo" / "telecomandos.toml"
 CAPTURAS = Path(__file__).resolve().parent / "capturas"
 
 PT = 14  # G12: letra de 14 pt o más, en toda la pantalla
-TRAZO = 3  # G12: trazos en negrita
 HISTORIA = 120  # segundos que muestra cada gráfico
 
 NAN = float("nan")
-COLORES = {"x": "#c0392b", "y": "#1e8449", "z": "#1f4e9c", "uno": "#1f4e9c", "dos": "#b9770e"}
+
+# --- temas (#20) ------------------------------------------------------------
+# Paletas con los mismos roles. light es la de siempre (la de las capturas);
+# dark, fondo oscuro con los colores aclarados para que se lean; high
+# contrast, al estilo de Windows (fondo negro, texto y bordes blancos, curvas
+# en amarillo y cian, la fase actual en amarillo) y con trazos, ejes, bordes y
+# grilla más gruesos. Se eligió entre tres (2026-11-16): ese, light al extremo
+# con los grosores, y la paleta de Windows con los grosores de siempre.
+# El QR queda negro sobre blanco en todos, si no no se escanea. Cambiar de
+# tema reconstruye la variante: colores y grosores se leen al armar cada widget.
+
+TEMAS = {
+    "light": {
+        "fondo": "white",  # la ventana y los gráficos
+        "texto": "black",
+        "sobre": "white",  # el texto sobre un relleno fuerte
+        "borde": "#555",  # tarjetas y botones
+        "linea": "#999",  # bordes finos: pie, consola, chip sin estado
+        "linea2": "#bbb",  # la fase que todavía no llegó
+        "tenue": "#555",  # texto secundario y la curva del panel
+        "suave": "#666",
+        "suave2": "#333",
+        "panel": "#f2f2f2",  # el pie y el chip sin estado
+        "cabecera": "#eee",
+        "consola": "#fafafa",
+        "relleno": "#1f4e9c",  # la fase actual y el botón de histórico
+        "relleno_claro": "#d6dde8",  # las fases pasadas
+        "azul": "#1f4e9c",
+        "rojo": "#b03a2e",
+        "rojo_relleno": "#b03a2e",
+        "rojo_borde": "#78281f",
+        "verde": "#1e8449",
+        "verde_texto": "#145a32",
+        "verde_fondo": "#e8f6ee",
+        "ocre": "#b9770e",
+        "ocre_texto": "#8a5a0b",
+        "ocre_texto2": "#6e4608",
+        "ocre_fondo": "#fdf2e0",
+        "curva_x": "#c0392b",
+        "gris": "#888",  # un bit en 0 que no es falla
+    },
+    "dark": {
+        "fondo": "#1b1b1b",
+        "texto": "#ececec",
+        "sobre": "#ffffff",
+        "borde": "#8a8a8a",
+        "linea": "#6a6a6a",
+        "linea2": "#555555",
+        "tenue": "#b0b0b0",
+        "suave": "#a0a0a0",
+        "suave2": "#dddddd",
+        "panel": "#262626",
+        "cabecera": "#2e2e2e",
+        "consola": "#141414",
+        "relleno": "#2b5fb4",
+        "relleno_claro": "#33415a",
+        "azul": "#7fb0ff",
+        "rojo": "#ff7b6e",
+        "rojo_relleno": "#b03a2e",
+        "rojo_borde": "#e06b5f",
+        "verde": "#5cd08a",
+        "verde_texto": "#8be3ab",
+        "verde_fondo": "#183a26",
+        "ocre": "#f0b24a",
+        "ocre_texto": "#f3c46e",
+        "ocre_texto2": "#f3c46e",
+        "ocre_fondo": "#3d2e12",
+        "curva_x": "#ff7b6e",
+        "gris": "#8a8a8a",
+    },
+    # amber: casi negro cálido, texto crema y bordes ámbar; cansa menos la
+    # vista adaptada a la oscuridad. Se eligió con dark entre tres candidatos
+    # (2026-11-16); quedaron los dos. El tercero era azul pizarra.
+    "amber": {
+        "fondo": "#120d08",
+        "texto": "#ffd9a0",
+        "sobre": "#120d08",
+        "borde": "#a07a4a",
+        "linea": "#6b5236",
+        "linea2": "#4a3a28",
+        "tenue": "#d9b27a",
+        "suave": "#c09a66",
+        "suave2": "#ffe3b8",
+        "panel": "#1c140c",
+        "cabecera": "#241a10",
+        "consola": "#0c0805",
+        "relleno": "#ff9f1c",
+        "relleno_claro": "#3d2c18",
+        "azul": "#7fd3ff",
+        "rojo": "#ff6b5a",
+        "rojo_relleno": "#d13f2a",
+        "rojo_borde": "#ff9a8a",
+        "verde": "#9ad66b",
+        "verde_texto": "#b8e68f",
+        "verde_fondo": "#1f2a12",
+        "ocre": "#ffb000",
+        "ocre_texto": "#ffc94d",
+        "ocre_texto2": "#ffc94d",
+        "ocre_fondo": "#3a2a08",
+        "curva_x": "#ff6b5a",
+        "gris": "#8a7254",
+    },
+    "high contrast": {
+        "fondo": "#000000",
+        "texto": "#ffffff",
+        "sobre": "#000000",
+        "borde": "#ffffff",
+        "linea": "#ffffff",
+        "linea2": "#ffffff",
+        "tenue": "#ffffff",
+        "suave": "#c0c0c0",
+        "suave2": "#ffffff",
+        "panel": "#000000",
+        "cabecera": "#000000",
+        "consola": "#000000",
+        "relleno": "#ffff00",
+        "relleno_claro": "#404040",
+        "azul": "#00ffff",
+        "rojo": "#ff5050",
+        "rojo_relleno": "#ff3030",
+        "rojo_borde": "#ffffff",
+        "verde": "#00ff00",
+        "verde_texto": "#00ff00",
+        "verde_fondo": "#000000",
+        "ocre": "#ffff00",
+        "ocre_texto": "#ffff00",
+        "ocre_texto2": "#ffff00",
+        "ocre_fondo": "#000000",
+        "curva_x": "#ff5050",
+        "gris": "#a0a0a0",
+    },
+}
+# G12 pide trazos y ejes en negrita: 3 px las curvas y 2 px los ejes y bordes.
+# El alto contraste los engrosa.
+GROSORES = {
+    "normal": {"trazo": 3, "eje": 2, "borde": 2, "grilla": 0.25},
+    "grueso": {"trazo": 5, "eje": 3, "borde": 3, "grilla": 0.45},
+}
+GRUESOS = {"high contrast"}
+
+C: dict[str, str] = {}  # la paleta del tema actual; la llena aplicar_tema
+G: dict[str, float] = {}  # los grosores del tema actual
+
+
+def css_borde(color: str) -> str:
+    """El borde de un widget, con el grosor del tema."""
+    return f"border: {G['borde']}px solid {color};"
+
+
+COLORES: dict[str, str] = {}  # x, y, z, uno y dos: el color de cada curva
+COLOR_NIVEL: dict[str, str] = {}  # la marca ● o ▲ de los avisos del pie
 
 # --- formato --------------------------------------------------------------
 
@@ -856,7 +1015,7 @@ def texto_eco(p: dict) -> str:
 
 
 def configurar_pyqtgraph() -> None:
-    pg.setConfigOptions(background="w", foreground="k", antialias=True)
+    pg.setConfigOptions(background=C["fondo"], foreground=C["texto"], antialias=True)
 
 
 def grafico(titulo: str, unidad: str, series: list[str]) -> tuple[pg.PlotWidget, dict]:
@@ -867,14 +1026,14 @@ def grafico(titulo: str, unidad: str, series: list[str]) -> tuple[pg.PlotWidget,
     w.setTitle(f"<b>{titulo} [{unidad}]</b>", size=f"{PT}pt")
     for lado in ("left", "bottom"):
         eje = w.getAxis(lado)
-        eje.setPen(pg.mkPen("k", width=2))
-        eje.setTextPen("k")
+        eje.setPen(pg.mkPen(C["texto"], width=G["eje"]))
+        eje.setTextPen(C["texto"])
         eje.setStyle(tickFont=fuente)
-    estilo = {"color": "#000", "font-size": f"{PT}pt", "font-weight": "bold"}
+    estilo = {"color": C["texto"], "font-size": f"{PT}pt", "font-weight": "bold"}
     # Segundos desde que arrancó la estación: MISSION_TIME no tiene dato antes de
     # la eyección.
     w.setLabel("bottom", "Time [s]", **estilo)
-    w.showGrid(x=True, y=True, alpha=0.25)
+    w.showGrid(x=True, y=True, alpha=G["grilla"])
     w.setMouseEnabled(False, False)
     w.hideButtons()
     if len(series) > 1:
@@ -883,7 +1042,7 @@ def grafico(titulo: str, unidad: str, series: list[str]) -> tuple[pg.PlotWidget,
     for s in series:
         color = COLORES.get(s[-1], COLORES["uno"]) if len(series) > 1 else COLORES["uno"]
         curvas[s] = w.plot(
-            pen=pg.mkPen(color, width=TRAZO), name=s[-1] if len(series) > 1 else None
+            pen=pg.mkPen(color, width=G["trazo"]), name=s[-1] if len(series) > 1 else None
         )
     return w, curvas
 
@@ -918,7 +1077,7 @@ class PanelComandos(QWidget):
             b = QPushButton(texto)
             b.setMinimumHeight(36)
             if confirmar:
-                b.setStyleSheet("QPushButton { border: 2px solid #b03a2e; padding: 4px 10px; }")
+                b.setStyleSheet(f"QPushButton {{ {css_borde(C['rojo'])} padding: 4px 10px; }}")
             b.clicked.connect(lambda _=False, n=nombre, c=confirmar, t=texto: self.mandar(n, c, t))
             caja.addWidget(b)
         self.linea = QLineEdit()
@@ -1041,7 +1200,7 @@ class VarianteA(QWidget):
         self.ind["tiempo_mision"].setText(fmt("tiempo_mision", p["tiempo_mision"]))
         self.ind["recibidos"].setText(fmt("", s.recibidos))
         self.ind["perdidos"].setText(fmt("", s.perdidos))
-        self.ind["perdidos"].setStyleSheet("color: #b03a2e" if s.perdidos else "")
+        self.ind["perdidos"].setStyleSheet(f"color: {C['rojo']}" if s.perdidos else "")
         self.ind["hora"].setText(p["hora"])
         self.ind["alt_max"].setText(fmt("altitud", s.alt_max))
         for i, c in enumerate(CAMPOS):
@@ -1117,7 +1276,7 @@ class VarianteB(QWidget):
         self.ind["hora"].setText(p["hora"])
         self.ind["recibidos"].setText(fmt("", s.recibidos))
         self.ind["perdidos"].setText(fmt("", s.perdidos))
-        self.ind["perdidos"].setStyleSheet("color: #b03a2e" if s.perdidos else "")
+        self.ind["perdidos"].setStyleSheet(f"color: {C['rojo']}" if s.perdidos else "")
         self.ind["temperatura"].setText(fmt("temperatura", p["temperatura"]))
         self.ind["gps"].setText(
             f"{fmt('gps_latitud', p['gps_latitud'])}  {fmt('gps_longitud', p['gps_longitud'])}"
@@ -1146,7 +1305,7 @@ class Tarjeta(QFrame):
     def __init__(self, titulo: str, campos: list[str], graf=None) -> None:
         super().__init__()
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("Tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        self.setStyleSheet(f"Tarjeta {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         v = QVBoxLayout(self)
         v.setContentsMargins(6, 4, 6, 4)
         v.setSpacing(2)
@@ -1228,7 +1387,7 @@ class VarianteC(QWidget):
         # La corriente también tiene que graficarse (G7): segunda curva en Energía.
         energia = self.tarjetas[2]
         w = energia.findChild(pg.PlotWidget)
-        energia.curvas["corriente_bateria"] = w.plot(pen=pg.mkPen(COLORES["dos"], width=TRAZO))
+        energia.curvas["corriente_bateria"] = w.plot(pen=pg.mkPen(COLORES["dos"], width=G["trazo"]))
         titulo = f"{con_unidad('tension_bateria')} and {con_unidad('corriente_bateria')}"
         w.setTitle(f"<b>{titulo}</b>", size=f"{PT}pt")
 
@@ -1278,12 +1437,7 @@ def indice_fase(estado: str) -> int:
 
 
 BANDA = {"DESCENT_1": (15, 3, "C3"), "DESCENT_2": (5, 3, "C4")}  # bajada [m/s]
-NIVEL = {
-    "ok": "background: #e8f6ee; color: #145a32; border: 2px solid #1e8449;",
-    "aviso": "background: #fdf2e0; color: #6e4608; border: 2px solid #b9770e;",
-    "error": "background: #b03a2e; color: white; border: 2px solid #78281f;",
-    "nada": "background: #f2f2f2; color: #333; border: 2px solid #999;",
-}
+NIVEL: dict[str, str] = {}  # ok, aviso, error y nada; lo llena aplicar_tema
 
 
 def inicio_ventana(sim: Simulador, modo: str) -> float:
@@ -1339,7 +1493,7 @@ class TarjetaH(QFrame):
     def __init__(self, titulo: str, filas: list[str], graficos=(), columnas: int = 1) -> None:
         super().__init__()
         self.setObjectName("tarjeta")
-        self.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        self.setStyleSheet(f"#tarjeta {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         v = QVBoxLayout(self)
         v.setContentsMargins(6, 4, 6, 4)
         v.setSpacing(2)
@@ -1414,7 +1568,9 @@ class TarjetaH(QFrame):
         if self.boton is not None:
             self.boton.setText(f"Live ({HISTORIA} s)" if modo == "vivo" else "History (mission)")
             self.boton.setStyleSheet(
-                "" if modo == "vivo" else "QPushButton { background: #1f4e9c; color: white; }"
+                ""
+                if modo == "vivo"
+                else f"QPushButton {{ background: {C['relleno']}; color: {C['sobre']}; }}"
             )
         for w in self.plots:
             # En histórico se puede hacer zoom y arrastrar; en vivo, no.
@@ -1452,8 +1608,8 @@ class Franja(QWidget):
     def actualizar(self, datos: dict) -> None:
         for clave, valor in self.ind.items():
             valor.setText(fmt(clave, datos[clave]) if datos[clave] != "" else "—")
-        self.ind["perdidos"].setStyleSheet("color: #b03a2e" if datos["perdidos"] else "")
-        self.ind["descartados"].setStyleSheet("color: #b03a2e" if datos["descartados"] else "")
+        self.ind["perdidos"].setStyleSheet(f"color: {C['rojo']}" if datos["perdidos"] else "")
+        self.ind["descartados"].setStyleSheet(f"color: {C['rojo']}" if datos["descartados"] else "")
 
 
 def chip(texto: str, nivel: str) -> QLabel:
@@ -1612,7 +1768,7 @@ class VarianteE(Hibrido):
         medio.addLayout(self.grilla_3x2(), 1)
         caja = QFrame()
         caja.setObjectName("comandos")
-        caja.setStyleSheet("#comandos { border: 2px solid #555; border-radius: 4px; }")
+        caja.setStyleSheet(f"#comandos {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         caja.setFixedWidth(250)
         cv = QVBoxLayout(caja)
         cv.setContentsMargins(4, 4, 4, 4)
@@ -1624,7 +1780,9 @@ class VarianteE(Hibrido):
         raiz.addLayout(medio, 1)
         pie = QFrame()
         pie.setObjectName("pie")
-        pie.setStyleSheet("#pie { background: #f2f2f2; border-top: 2px solid #999; }")
+        pie.setStyleSheet(
+            f"#pie {{ background: {C['panel']}; border-top: {G['borde']}px solid {C['linea']}; }}"
+        )
         ph = QHBoxLayout(pie)
         ph.setContentsMargins(8, 2, 8, 2)
         ph.addWidget(label("GCS", negrita=True))
@@ -1640,22 +1798,25 @@ class VarianteE(Hibrido):
         actual = indice_fase(self.sim.ultimo["estado_fsw"])
         for i, lb in enumerate(self.fases):
             if i == actual:
-                estilo = "background: #1f4e9c; color: white; border: 2px solid #1f4e9c;"
+                fondo, texto, borde = C["relleno"], C["sobre"], C["relleno"]
             elif i < actual:
-                estilo = "background: #d6dde8; color: #333; border: 2px solid #d6dde8;"
+                fondo, texto, borde = C["relleno_claro"], C["suave2"], C["relleno_claro"]
             else:
-                estilo = "background: white; color: #666; border: 2px solid #bbb;"
-            lb.setStyleSheet(estilo + "padding: 2px;")
+                fondo, texto, borde = C["fondo"], C["suave"], C["linea2"]
+            lb.setStyleSheet(
+                f"background: {fondo}; color: {texto}; {css_borde(borde)}padding: 2px;"
+            )
 
     def actualizar_avisos(self, condiciones) -> None:
-        colores = {"ok": "#145a32", "aviso": "#8a5a0b", "error": "#b03a2e"}
         for lb, (titulo, texto, nivel) in zip(self.pie, condiciones, strict=True):
             marca = "●" if nivel == "ok" else "▲"
             lb.setText(
-                f"<span style='color:{colores[nivel]}'>{marca}</span> {titulo}: <b>{texto}</b>"
+                f"<span style='color:{COLOR_NIVEL[nivel]}'>{marca}</span> {titulo}: <b>{texto}</b>"
             )
             lb.setStyleSheet(
-                "background: #b03a2e; color: white;" if nivel == "error" else "color: black;"
+                f"background: {C['rojo_relleno']}; color: {C['sobre']};"
+                if nivel == "error"
+                else f"color: {C['texto']};"
             )
 
 
@@ -1775,7 +1936,7 @@ class TarjetaRecorrido(QFrame):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("tarjeta")
-        self.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        self.setStyleSheet(f"#tarjeta {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         v = QVBoxLayout(self)
         v.setContentsMargins(6, 4, 6, 4)
         v.setSpacing(2)
@@ -1796,21 +1957,21 @@ class TarjetaRecorrido(QFrame):
         fuente.setBold(True)
         for lado, texto in (("left", "North [m]"), ("bottom", "East [m]")):
             eje = self.plot.getAxis(lado)
-            eje.setPen(pg.mkPen("k", width=2))
-            eje.setTextPen("k")
+            eje.setPen(pg.mkPen(C["texto"], width=G["eje"]))
+            eje.setTextPen(C["texto"])
             eje.setStyle(tickFont=fuente)
-            self.plot.setLabel(lado, texto, color="#000", **{"font-size": f"{PT}pt"})
+            self.plot.setLabel(lado, texto, color=C["texto"], **{"font-size": f"{PT}pt"})
         self.plot.setAspectLocked(True)
-        self.plot.showGrid(x=True, y=True, alpha=0.25)
+        self.plot.showGrid(x=True, y=True, alpha=G["grilla"])
         self.plot.setMouseEnabled(False, False)
         self.plot.hideButtons()
         self.plot.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.plot.setMinimumHeight(140)
-        self.traza = self.plot.plot(pen=pg.mkPen(COLORES["uno"], width=TRAZO))
+        self.traza = self.plot.plot(pen=pg.mkPen(COLORES["uno"], width=G["trazo"]))
         self.base = self.plot.plot(
-            symbol="t", symbolSize=14, symbolBrush="#1e8449", pen=None
+            symbol="t", symbolSize=14, symbolBrush=C["verde"], pen=None
         )  # lanzamiento
-        self.punto = self.plot.plot(symbol="o", symbolSize=14, symbolBrush="#c0392b", pen=None)
+        self.punto = self.plot.plot(symbol="o", symbolSize=14, symbolBrush=C["curva_x"], pen=None)
         self.pila.addWidget(self.plot)
         qr = QWidget()
         qv = QVBoxLayout(qr)
@@ -1911,7 +2072,7 @@ class VarianteG(Hibrido):
         columna.setSpacing(4)
         caja = QFrame()
         caja.setObjectName("comandos")
-        caja.setStyleSheet("#comandos { border: 2px solid #555; border-radius: 4px; }")
+        caja.setStyleSheet(f"#comandos {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         cv = QVBoxLayout(caja)
         cv.setContentsMargins(4, 4, 4, 4)
         cv.addWidget(label("Telecommands", negrita=True, pt=PT + 2))
@@ -1927,7 +2088,9 @@ class VarianteG(Hibrido):
         raiz.addLayout(medio, 1)
         pie = QFrame()
         pie.setObjectName("pie")
-        pie.setStyleSheet("#pie { background: #f2f2f2; border-top: 2px solid #999; }")
+        pie.setStyleSheet(
+            f"#pie {{ background: {C['panel']}; border-top: {G['borde']}px solid {C['linea']}; }}"
+        )
         ph = QHBoxLayout(pie)
         ph.setContentsMargins(8, 2, 8, 2)
         ph.addWidget(label("GCS", negrita=True))
@@ -1936,6 +2099,14 @@ class VarianteG(Hibrido):
             lb = label("—")
             self.pie.append(lb)
             ph.addWidget(lb, 1)
+        # #20: el tema, al final del pie. La ventana le pone el actual y lo
+        # conecta: cambiarlo reconstruye la variante.
+        self.combo_tema = QComboBox()
+        self.combo_tema.setFocusPolicy(Qt.FocusPolicy.NoFocus)  # las teclas, de la simulación
+        self.combo_tema.setToolTip("Theme")
+        self.combo_tema.addItems(list(TEMAS))
+        self.combo_tema.setStyleSheet("padding: 0px 4px;")
+        ph.addWidget(self.combo_tema)
         raiz.addWidget(pie)
 
     def panel_comandos(self, sim: Simulador) -> QWidget:
@@ -1947,12 +2118,14 @@ class VarianteG(Hibrido):
         actual = indice_fase(s.ultimo["estado_fsw"])
         for i, lb in enumerate(self.fases):
             if i == actual:
-                estilo = "background: #1f4e9c; color: white; border: 2px solid #1f4e9c;"
+                fondo, texto, borde = C["relleno"], C["sobre"], C["relleno"]
             elif i < actual:
-                estilo = "background: #d6dde8; color: #333; border: 2px solid #d6dde8;"
+                fondo, texto, borde = C["relleno_claro"], C["suave2"], C["relleno_claro"]
             else:
-                estilo = "background: white; color: #666; border: 2px solid #bbb;"
-            lb.setStyleSheet(estilo + "padding: 2px;")
+                fondo, texto, borde = C["fondo"], C["suave"], C["linea2"]
+            lb.setStyleSheet(
+                f"background: {fondo}; color: {texto}; {css_borde(borde)}padding: 2px;"
+            )
         # Q7: la velocidad vertical con la banda en el color y casi sin texto.
         val = self.t["vuelo"].valores["vel_vertical"]
         estado = s.ultimo["estado_fsw"]
@@ -2036,7 +2209,7 @@ CANALES = [  # (tensión, corriente) de cada canal del INA3221
     ("tension_3v3", "corriente_3v3"),
     ("tension_panel", "corriente_panel"),
 ]
-COLOR_CANAL = {"bateria": COLORES["uno"], "3v3": COLORES["dos"], "panel": "#555"}
+COLOR_CANAL: dict[str, str] = {}  # batería, 3v3 y panel; lo llena aplicar_tema
 
 
 def canal(nombre: str) -> str:
@@ -2101,10 +2274,10 @@ def plot_energia(alto_minimo: int = 70) -> pg.PlotWidget:
     fuente.setBold(True)
     for lado in ("left", "bottom"):
         eje = w.getAxis(lado)
-        eje.setPen(pg.mkPen("k", width=2))
-        eje.setTextPen("k")
+        eje.setPen(pg.mkPen(C["texto"], width=G["eje"]))
+        eje.setTextPen(C["texto"])
         eje.setStyle(tickFont=fuente)
-    w.showGrid(x=True, y=True, alpha=0.25)
+    w.showGrid(x=True, y=True, alpha=G["grilla"])
     w.setMouseEnabled(False, False)
     w.hideButtons()
     w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
@@ -2125,7 +2298,7 @@ def eje_derecho(w: pg.PlotWidget, color_izq: str, color_der: str) -> pg.ViewBox:
     fuente = QFont()
     fuente.setPointSize(PT)
     fuente.setBold(True)
-    der.setPen(pg.mkPen("k", width=2))
+    der.setPen(pg.mkPen(C["texto"], width=G["eje"]))
     der.setStyle(tickFont=fuente)
     der.setTextPen(color_der)
     pi.getAxis("left").setTextPen(color_izq)
@@ -2147,7 +2320,7 @@ class TarjetaEnergia(QFrame):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("tarjeta")
-        self.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        self.setStyleSheet(f"#tarjeta {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         v = QVBoxLayout(self)
         v.setContentsMargins(6, 4, 6, 4)
         v.setSpacing(2)
@@ -2231,7 +2404,7 @@ class EnergiaPorMagnitud(TarjetaEnergia):
             col.setSpacing(0)
             col.addStretch(1)
             for nombre in grupo:
-                pen = pg.mkPen(COLOR_CANAL[canal(nombre)], width=TRAZO)
+                pen = pg.mkPen(COLOR_CANAL[canal(nombre)], width=G["trazo"])
                 self.curvas[nombre] = w.plot(pen=pen)
                 col.addWidget(label(marca(nombre)))
                 col.addWidget(self.valor(nombre, alinear=Qt.AlignmentFlag.AlignRight))
@@ -2266,8 +2439,8 @@ class EnergiaPorCanal(TarjetaEnergia):
             vista = eje_derecho(w, cv, ca)
             self.plots.append(w)
             self.vistas.append(vista)
-            self.curvas[tension] = w.plot(pen=pg.mkPen(cv, width=TRAZO))
-            curva = pg.PlotCurveItem(pen=pg.mkPen(ca, width=TRAZO))
+            self.curvas[tension] = w.plot(pen=pg.mkPen(cv, width=G["trazo"]))
+            curva = pg.PlotCurveItem(pen=pg.mkPen(ca, width=G["trazo"]))
             vista.addItem(curva)
             self.curvas[corriente] = curva
             h.addWidget(w, 1)
@@ -2332,7 +2505,7 @@ class EnergiaNumeros(TarjetaEnergia):
             w = plot_energia(60)
             self.plots.append(w)
             for nombre in grupo:
-                pen = pg.mkPen(COLOR_CANAL[canal(nombre)], width=TRAZO)
+                pen = pg.mkPen(COLOR_CANAL[canal(nombre)], width=G["trazo"])
                 self.curvas[nombre] = w.plot(pen=pen)
             graficos.addWidget(w, 1)
         h.addLayout(graficos, 1)
@@ -2434,7 +2607,7 @@ class TarjetaEnlace(QFrame):
     def __init__(self, forma: str) -> None:
         super().__init__()
         self.setObjectName("tarjeta")
-        self.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        self.setStyleSheet(f"#tarjeta {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         self.estado = label("NO LINK", negrita=True, alinear=Qt.AlignmentFlag.AlignCenter)
         self.valores: dict[str, QLabel] = {}
         derecha = Qt.AlignmentFlag.AlignRight
@@ -2491,7 +2664,7 @@ class TarjetaEnlace(QFrame):
             lb = self.valores[nombre]
             lb.setText(texto)
             rojo = nombre in EN_ROJO and texto not in ("0", "—")
-            lb.setStyleSheet("color: #b03a2e" if rojo else "")
+            lb.setStyleSheet(f"color: {C['rojo']}" if rojo else "")
 
 
 class FranjaSinConteos(Franja):
@@ -2541,7 +2714,12 @@ class SpinMiles(QSpinBox):
         return QValidator.State.Acceptable, texto, pos
 
 
-COLOR_ESTADO = {"PENDING": "#8a5a0b", "ACK": "#145a32", "REJECTED": "#b03a2e", "NO ACK": "#b03a2e"}
+COLOR_ESTADO = {
+    "PENDING": "ocre_texto",
+    "ACK": "verde_texto",
+    "REJECTED": "rojo",
+    "NO ACK": "rojo",
+}  # el rol de la paleta
 INT32 = (-(2**31), 2**31 - 1)  # el parámetro, cuando el .toml no da el rango
 
 
@@ -2571,7 +2749,7 @@ class PanelComandosCombo(QWidget):
         self.entero = SpinMiles()
         self.entero.setKeyboardTracking(False)
         self.nada = label("")
-        self.nada.setStyleSheet("color: #555;")
+        self.nada.setStyleSheet(f"color: {C['tenue']};")
         for w in (self.valores, self.entero, self.nada):
             # Sin esto, el QSpinBox pide el ancho de «-2147483648 Pa».
             w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
@@ -2652,7 +2830,7 @@ class PanelComandosCombo(QWidget):
             izq.setText(m.elidedText(visible, Qt.TextElideMode.ElideRight, ancho))
             izq.setToolTip(texto)
             der.setText(e.estado)
-            der.setStyleSheet(f"color: {COLOR_ESTADO[e.estado]};")
+            der.setStyleSheet(f"color: {C[COLOR_ESTADO[e.estado]]};")
 
 
 class VarianteEnlace(VarianteG2B):
@@ -2677,7 +2855,6 @@ class VarianteEnlace(VarianteG2B):
         texto, nivel = estado_enlace(self.sim)
         condiciones = list(condiciones)
         condiciones[0] = ("Link", texto, "error") if nivel == "error" else None
-        colores = {"ok": "#145a32", "aviso": "#8a5a0b", "error": "#b03a2e"}
         for lb, cond in zip(self.pie, condiciones, strict=True):
             if cond is None:  # el enlace sano no se repite en el pie
                 lb.setText("")
@@ -2686,10 +2863,12 @@ class VarianteEnlace(VarianteG2B):
             titulo, texto, nivel = cond
             marca = "●" if nivel == "ok" else "▲"
             lb.setText(
-                f"<span style='color:{colores[nivel]}'>{marca}</span> {titulo}: <b>{texto}</b>"
+                f"<span style='color:{COLOR_NIVEL[nivel]}'>{marca}</span> {titulo}: <b>{texto}</b>"
             )
             lb.setStyleSheet(
-                "background: #b03a2e; color: white;" if nivel == "error" else "color: black;"
+                f"background: {C['rojo_relleno']}; color: {C['sobre']};"
+                if nivel == "error"
+                else f"color: {C['texto']};"
             )
 
 
@@ -2743,35 +2922,37 @@ class VarianteL3(VarianteEnlace):
 # Una línea del puente son 150 hex más el RSSI y el SNR: a 14 pt (G12) entran
 # unos 120 caracteres a lo ancho, así que cada paquete ocupa dos líneas.
 ETIQUETA_CONSOLA = {
-    "rx": ("RX", "#145a32"),
-    "crc": ("BAD CRC", "#b03a2e"),
-    "lost": ("LOST", "#b03a2e"),
-    "foreign": ("FOREIGN", "#8a5a0b"),
-    "tx": ("TX", "#1f4e9c"),
-    "heltec": ("HELTEC", "#666"),
+    "rx": ("RX", "verde_texto"),  # el rol de la paleta
+    "crc": ("BAD CRC", "rojo"),
+    "lost": ("LOST", "rojo"),
+    "foreign": ("FOREIGN", "ocre_texto"),
+    "tx": ("TX", "azul"),
+    "heltec": ("HELTEC", "suave"),
 }
 
 
 def html_linea(hora: str, tipo: str, texto: str) -> str:
     """Una entrada: hora, qué es y la línea tal cual; en un paquete, la cabecera
     CCSDS en azul y el CRC en ocre, para que se vea cómo baja el binario."""
-    etiqueta, color = ETIQUETA_CONSOLA[tipo]
+    etiqueta, rol = ETIQUETA_CONSOLA[tipo]
+    color = C[rol]
     if tipo in ("rx", "crc") and "," in texto:
         hexa, resto = texto.split(",", 1)
         cuerpo = (
-            f"<span style='color:#1f4e9c'>{hexa[:12]}</span>"
-            f"<span style='color:#666'>{hexa[12:14]}</span>"
+            f"<span style='color:{C['azul']}'>{hexa[:12]}</span>"
+            f"<span style='color:{C['suave']}'>{hexa[12:14]}</span>"
             f"{hexa[14:-4]}"
-            f"<span style='color:#b9770e; font-weight:bold'>{hexa[-4:]}</span>"
-            f"<span style='color:#666'>,{resto}</span>"
+            f"<span style='color:{C['ocre']}; font-weight:bold'>{hexa[-4:]}</span>"
+            f"<span style='color:{C['suave']}'>,{resto}</span>"
         )
     elif tipo == "foreign":
-        cuerpo = f"<span style='color:#666'>{texto}</span>"
+        cuerpo = f"<span style='color:{C['suave']}'>{texto}</span>"
     else:
         cuerpo = texto
     marca = f"<b style='color:{color}'>{etiqueta.ljust(7).replace(' ', '&nbsp;')}</b>"
     return (
-        f"<p style='margin:0'><span style='color:#555'>{hora}</span>&nbsp;{marca}&nbsp;{cuerpo}</p>"
+        f"<p style='margin:0'><span style='color:{C['tenue']}'>{hora}</span>"
+        f"&nbsp;{marca}&nbsp;{cuerpo}</p>"
     )
 
 
@@ -2788,7 +2969,7 @@ class Consola(QTextEdit):
         self.setFont(fuente)
         self.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.document().setDocumentMargin(2)
-        self.setStyleSheet("QTextEdit { border: 2px solid #999; background: #fafafa; }")
+        self.setStyleSheet(f"QTextEdit {{ {css_borde(C['linea'])} background: {C['consola']}; }}")
         alto = lineas * QFontMetrics(fuente).lineSpacing() + 4 + 2 * self.frameWidth()
         self.setFixedHeight(alto)
         self.visto = None
@@ -2816,10 +2997,13 @@ class VarianteConsola(VarianteL3):
         raiz = self.layout()
         raiz.insertWidget(raiz.count() - 1, self.consola)
         if self.lineas > 3:  # 6 líneas no entran en 768 px con los 140 px de mínimo
+            # Los bordes gruesos de high contrast suman alto en cada tarjeta
+            # apilada: el gráfico lo devuelve.
+            minimo = 100 - 4 * (G["borde"] - 2)
             for t in self.t.values():
                 for w in getattr(t, "plots", []):
-                    w.setMinimumHeight(100)
-            self.t["recorrido"].plot.setMinimumHeight(100)
+                    w.setMinimumHeight(minimo)
+            self.t["recorrido"].plot.setMinimumHeight(minimo)
         self.boton = QPushButton()
         self.boton.setCheckable(True)
         self.boton.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -2862,8 +3046,6 @@ class VarianteK6F(VarianteConsola):
 
 # --- ronda 8 (#51): los seis campos de la v2 que faltaban -----------------
 
-ROJO = "#b03a2e"
-GRIS = "#888"
 # Las consultas de bits donde un 0 es una falla. No está en telecomandos.toml,
 # que sólo dice «1 = sí»: es presentación de la GCS. En GET_SENSORS un 0 es un
 # sensor que no responde; en CAM_STATUS un 0 puede ser lo normal (la cámara
@@ -2884,7 +3066,7 @@ def texto_extra(datos: dict) -> tuple[str, str]:
     forma = resp.get("forma")
     if forma == "bits":
         partes = []
-        color = ROJO if ident in FALLA_SI_CERO else GRIS
+        color = C["rojo"] if ident in FALLA_SI_CERO else C["gris"]
         for i, b in enumerate(resp["bits"]):
             nombre = b.upper()
             partes.append(nombre if v >> i & 1 else f"<s style='color:{color}'>{nombre}</s>")
@@ -2908,7 +3090,7 @@ def estilo_modo(modo: str) -> str:
     se pasa de 768 con la consola abierta."""
     if modo in ("FLIGHT", ""):
         return ""
-    return "background: #fdf2e0; color: #8a5a0b; padding: 0px 6px;"
+    return f"background: {C['ocre_fondo']}; color: {C['ocre_texto']}; padding: 0px 6px;"
 
 
 def sumar_filas(tarjeta: TarjetaH, filas: list[tuple[int, int, str]]) -> None:
@@ -3014,15 +3196,13 @@ class VarianteM2(VarianteK6):
     def poner_textos(self, d: dict) -> None:
         modo = d.get("modo", "—")
         self.modo.setText(f"{con_unidad('modo')} <b>{modo}</b>")
-        self.modo.setStyleSheet(
-            (estilo_modo(modo) or "border: 2px solid #bbb;") + "padding: 2px 8px;"
-        )
+        self.modo.setStyleSheet((estilo_modo(modo) or css_borde(C["linea2"])) + "padding: 2px 8px;")
         estado, servo = d.get("estado_descenso2", "—"), d.get("servo")
         self.descenso.setText(
             f"{con_unidad('estado_descenso2')} <b>{estado}</b>"
             f" · {con_unidad('servo')} <b>{fmt('servo', servo) if servo is not None else '—'}</b>"
         )
-        self.descenso.setStyleSheet("border: 2px solid #bbb; padding: 2px 8px;")
+        self.descenso.setStyleSheet(css_borde(C["linea2"]) + " padding: 2px 8px;")
         ident, valor = texto_extra(d) if d else ("—", "—")
         self.extra_id.setText(f"{con_unidad('extra_id')} {ident} · {con_unidad('extra_valor')}")
         self.extra.setText(valor)
@@ -3044,7 +3224,7 @@ class VarianteM3(VarianteK6):
         sumar_filas(self.t["vuelo"], [(4, 0, "humedad")])
         tarjeta = QFrame()
         tarjeta.setObjectName("tarjeta")
-        tarjeta.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        tarjeta.setStyleSheet(f"#tarjeta {{ {css_borde(C['borde'])} border-radius: 4px; }}")
         tarjeta.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         v = QVBoxLayout(tarjeta)
         v.setContentsMargins(6, 4, 6, 4)
@@ -3176,8 +3356,9 @@ def escribiendo() -> bool:
 
 
 class Ventana(QMainWindow):
-    def __init__(self, inicial: str, demo: bool = False) -> None:
+    def __init__(self, inicial: str, demo: bool = False, tema: str = "light") -> None:
         super().__init__()
+        self.tema = tema
         nota = "Simulated data" + ("; provisional format" if FORMATO.get("provisorio") else "")
         self.setWindowTitle(f"Avutardo GCS — PROTOTYPE — {nota}")
         self.demo = demo
@@ -3304,11 +3485,31 @@ class Ventana(QMainWindow):
         self.actual = clave
         self.vista = VARIANTES[clave](self.sim)
         self.setCentralWidget(self.vista)
+        combo = getattr(self.vista, "combo_tema", None)
+        if combo is not None:
+            combo.blockSignals(True)
+            combo.setCurrentText(self.tema)
+            combo.blockSignals(False)
+            # Diferido: el combo vive en la vista que poner() reemplaza.
+            combo.currentTextChanged.connect(
+                lambda t: QTimer.singleShot(0, lambda: self.cambiar_tema(t))
+            )
         self.refrescar()
         self.selector.texto.setText(f"{clave} ({self.vista.nombre})")
         self.selector.adjustSize()
         self.selector.raise_()
         self.ubicar_selector()
+
+    def cambiar_tema(self, nombre: str) -> None:
+        """#20: los colores se leen al armar cada widget, así que se rearma la
+        variante; el vuelo sigue (vive en `sim`), y la consola, si estaba abierta."""
+        consola = isinstance(self.vista, VarianteConsola) and self.vista.boton.isChecked()
+        self.tema = nombre
+        aplicar_tema(nombre)
+        self.poner(self.actual)
+        if consola:
+            self.vista.boton.setChecked(True)
+        # Sin avisar(): la barra de estado le suma 31 px de alto a la ventana.
 
     def ciclar(self, paso: int) -> None:
         i = (self.claves.index(self.actual) + paso) % len(self.claves)
@@ -3367,13 +3568,39 @@ class Ventana(QMainWindow):
         self.ubicar_selector()
 
 
-ESTILO = (
-    "QWidget { background: white; color: black; }"
-    "QTableWidget, QHeaderView, QPushButton, QLineEdit, QSpinBox { font-size: 14pt; }"
-    "QTableWidget::item { padding: 0px 4px; }"
-    "QPushButton { border: 2px solid #555; padding: 4px 10px; }"
-    "QHeaderView::section { font-weight: bold; background: #eee; }"
-)
+def estilo() -> str:
+    # Los botones, con 2 px en todos los temas: con 3, «Send» se corta.
+    return (
+        f"QWidget {{ background: {C['fondo']}; color: {C['texto']}; }}"
+        "QTableWidget, QHeaderView, QPushButton, QLineEdit, QSpinBox { font-size: 14pt; }"
+        "QTableWidget::item { padding: 0px 4px; }"
+        f"QPushButton {{ border: 2px solid {C['borde']}; padding: 4px 10px; }}"
+        f"QHeaderView::section {{ font-weight: bold; background: {C['cabecera']}; }}"
+    )
+
+
+def aplicar_tema(nombre: str) -> None:
+    """Llena la paleta y lo que se deriva de ella. Sólo alcanza a los widgets
+    que se arman después: quien cambia de tema reconstruye la variante."""
+    C.clear()
+    C.update(TEMAS[nombre])
+    G.update(GROSORES["grueso" if nombre in GRUESOS else "normal"])
+    COLORES.update(x=C["curva_x"], y=C["verde"], z=C["azul"], uno=C["azul"], dos=C["ocre"])
+    COLOR_CANAL.update(bateria=COLORES["uno"], **{"3v3": COLORES["dos"]}, panel=C["tenue"])
+    COLOR_NIVEL.update(ok=C["verde_texto"], aviso=C["ocre_texto"], error=C["rojo"])
+    NIVEL.update(
+        ok=f"background: {C['verde_fondo']}; color: {C['verde_texto']}; {css_borde(C['verde'])}",
+        aviso=f"background: {C['ocre_fondo']}; color: {C['ocre_texto2']}; {css_borde(C['ocre'])}",
+        error=f"background: {C['rojo_relleno']}; color: {C['sobre']}; {css_borde(C['rojo_borde'])}",
+        nada=f"background: {C['panel']}; color: {C['suave2']}; {css_borde(C['linea'])}",
+    )
+    app = QApplication.instance()
+    if app is not None:
+        app.setStyleSheet(estilo())
+    configurar_pyqtgraph()
+
+
+aplicar_tema("light")
 
 
 # --- capturas de la diap. 77 ----------------------------------------------
@@ -3402,7 +3629,7 @@ def imagen(widget: QWidget) -> QImage:
     """El widget dibujado al doble de píxeles (no escalado después)."""
     img = QImage(widget.size() * ESCALA, QImage.Format.Format_ARGB32)
     img.setDevicePixelRatio(ESCALA)
-    img.fill(QColor("white"))
+    img.fill(QColor(C["fondo"]))
     widget.render(img)
     return img
 
@@ -3468,6 +3695,12 @@ def argumentos() -> argparse.Namespace:
     a.add_argument("--simular", choices=["demo"], help="run the fixed demo flight")
     a.add_argument("--hasta", choices=INSTANTES, help="advance the demo flight to this instant")
     a.add_argument(
+        "--tema",
+        choices=list(TEMAS),
+        default="light",
+        help="color theme (default: light, the one of the screenshots)",
+    )
+    a.add_argument(
         "--captura",
         type=Path,
         metavar="PNG",
@@ -3494,10 +3727,9 @@ def main() -> None:
         f.setFamily("Segoe UI")  # la de la ventana real en Windows
     f.setPointSize(PT)
     app.setFont(f)
-    app.setStyleSheet(ESTILO)
-    configurar_pyqtgraph()
+    aplicar_tema(args.tema)
     demo = bool(args.captura) or args.simular == "demo"
-    v = Ventana(inicial if inicial in VARIANTES else por_defecto, demo=demo)
+    v = Ventana(inicial if inicial in VARIANTES else por_defecto, demo=demo, tema=args.tema)
     if args.captura:
         capturar_demo(app, v, args.hasta, args.captura)
         return
