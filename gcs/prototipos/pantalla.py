@@ -107,6 +107,12 @@ y en gris en las demás (FALLA_SI_CERO).
     «E →» derechos dentro del mapa en vez de los rótulos de los ejes, y las
     mismas marcas. Sigue en 765 px (768 en high contrast).
 
+    #58: esos 765 eran el mínimo, no lo que pide la ventana. En el peor caso
+    (consola abierta, LANDED, MODE en ámbar, EXTRA_ID = CAM_STATUS) pedía 790
+    (793 en high contrast) y el layout aplastaba el Send y los combos de
+    Telecommands. M4 le saca 28 px al aire de esa tarjeta: ahora pide 762
+    (765 en high contrast), y --captura falla si la ventana pide más de 768.
+
 Telecomandos (#21), en las variantes de las rondas 6 y 7: un combobox con los
 19 de `telecomandos.toml` y, al lado, el parámetro que pide cada uno (lista de
 valores, número con su unidad y el rango del .toml, o nada; TIME_SET toma la
@@ -3372,6 +3378,15 @@ class VarianteM4(VarianteK6):
         linea = QFrame()
         linea.setFrameShape(QFrame.Shape.HLine)
         cv = self.caja_comandos.layout()
+        # #58: con el par extra, la columna derecha pedía 25 px más de los que
+        # hay con la consola abierta (high contrast), y el layout aplastaba el
+        # Send y los combos. Se sacan del aire de la tarjeta, no de la letra ni
+        # de los gráficos: el panel no repite el margen de la caja (8 px), y los
+        # espacios bajan de 6 a 2 en la caja (12) y de 4 a 2 en el panel (8).
+        cv.setSpacing(2)
+        panel = self.comandos.layout()
+        panel.setContentsMargins(0, 0, 0, 0)
+        panel.setSpacing(2)
         cv.addWidget(linea)
         cv.addWidget(self.extra)
 
@@ -3763,6 +3778,11 @@ def capturar_demo(app: QApplication, v: Ventana, instante: str, destino: Path) -
     entera = imagen(v)
     esperado = (1366 * ESCALA, 768 * ESCALA)
     assert (entera.width(), entera.height()) == esperado, (entera.size(), esperado)
+    # La imagen siempre mide 1366×768 porque la ventana se fuerza a ese alto:
+    # si pide más, alguna tarjeta salió aplastada (#58).
+    pide = v.sizeHint().height()
+    if pide > 768:
+        sys.exit(f"The window asks for {pide} px of height and only 768 fit")
     entera.save(str(destino))
     grabadas = [destino]
     if instante == "standby":
