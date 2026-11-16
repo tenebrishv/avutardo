@@ -148,29 +148,65 @@ with TOML.open("rb") as f:
     FORMATO = tomllib.load(f)
 CAMPOS = FORMATO["campo"]
 UNIDAD = {c["nombre"]: c["unidad"] for c in CAMPOS}
+ETIQUETA = {c["nombre"]: c["etiqueta"] for c in CAMPOS}
+# Los que se muestran de otra forma (la hora, en hh:mm:ss): su unidad no es la
+# del texto en pantalla, así que van sin corchetes.
+SIN_CORCHETES = {c["nombre"] for c in CAMPOS if c.get("mostrar")}
 with TOML_TC.open("rb") as f:
     COMANDOS = {c["nombre"]: c for c in tomllib.load(f)["comando"]}
 
+# Lo que cuenta o calcula la GCS, que no es un campo del formato: inglés común,
+# nunca una etiqueta inventada en mayúsculas (#25). Los conteos, con la forma en
+# pantalla de GLOSSARY.md.
+CALCULADO = {
+    "contador": "Sequence count",  # el de la cabecera CCSDS
+    "recibidos": "Received",
+    "perdidos": "Lost",
+    "descartados": "Discarded",
+    "eco": "CMD_ECHO",  # los tres campos del eco en una línea
+    "vel_vertical": "Vertical speed [m/s]",
+    "alt_max": "Max altitude [m]",
+    "rendimiento": "Buck efficiency [%]",
+    "potencia_bateria": "Battery power [W]",
+    "potencia_3v3": "3.3 V bus power [W]",
+    "potencia_panel": "Solar panel power [W]",
+}
+
+MILES = " "  # espacio fino irrompible
+
+
+def agrupar(texto: str) -> str:
+    """Agrupa de a tres la parte entera, desde 4 dígitos: 1245 → 1 245."""
+    signo, texto = ("-", texto[1:]) if texto.startswith("-") else ("", texto)
+    entera, punto, decimales = texto.partition(".")
+    if len(entera) >= 4:
+        primero = len(entera) % 3 or 3
+        resto = [entera[i : i + 3] for i in range(primero, len(entera), 3)]
+        entera = MILES.join([entera[:primero], *resto])
+    return signo + entera + punto + decimales
+
 
 def fmt(nombre: str, valor) -> str:
-    """Punto decimal y espacio fino de miles, como la norma del equipo."""
+    """Punto decimal y espacio fino irrompible de miles, como la norma del equipo."""
     if isinstance(valor, str):
         return valor
     if isinstance(valor, float) and math.isnan(valor):
         return "—"  # sin dato
     if isinstance(valor, int):
-        return f"{valor:,}".replace(",", " ")
+        return agrupar(str(valor))
     dec = 6 if nombre.startswith("gps_l") else 2 if abs(valor) < 100 else 1
-    return f"{valor:,.{dec}f}".replace(",", " ")
-
-
-def etiqueta(nombre: str) -> str:
-    return nombre.replace("_", " ").capitalize()
+    return agrupar(f"{valor:.{dec}f}")
 
 
 def con_unidad(nombre: str) -> str:
-    u = UNIDAD.get(nombre, "")
-    return f"{etiqueta(nombre)} [{u}]" if u else etiqueta(nombre)
+    """Cómo se rotula en pantalla: la etiqueta del .toml con su unidad
+    (`TX_POWER [dBm]`), o el inglés común de lo que calcula la GCS."""
+    if nombre in CALCULADO:
+        return CALCULADO[nombre]
+    u = UNIDAD[nombre]
+    if u and nombre not in SIN_CORCHETES:
+        return f"{ETIQUETA[nombre]} [{u}]"
+    return ETIQUETA[nombre]
 
 
 # --- simulador de juguete -------------------------------------------------
@@ -466,7 +502,7 @@ def grafico(titulo: str, unidad: str, series: list[str]) -> tuple[pg.PlotWidget,
         eje.setTextPen("k")
         eje.setStyle(tickFont=fuente)
     estilo = {"color": "#000", "font-size": f"{PT}pt", "font-weight": "bold"}
-    w.setLabel("bottom", "Tiempo de misión [s]", **estilo)
+    w.setLabel("bottom", con_unidad("tiempo_mision"), **estilo)
     w.showGrid(x=True, y=True, alpha=0.25)
     w.setMouseEnabled(False, False)
     w.hideButtons()
@@ -502,10 +538,10 @@ class PanelComandos(QWidget):
         caja = QVBoxLayout(self) if vertical else QHBoxLayout(self)
         caja.setContentsMargins(4, 4, 4, 4)
         botones = [
-            ("Altitud cero", "CAL_ALT", True),
-            ("Hora UTC", "TIME_SET", False),
-            ("Datos extra", "GET_SENSORS", False),
-            ("Cortar la telemetría", "CX OFF", True),
+            ("Zero altitude", "CAL_ALT", True),
+            ("Set UTC time", "TIME_SET", False),
+            ("Extra data", "GET_SENSORS", False),
+            ("Telemetry off", "CX OFF", True),
         ]
         for texto, nombre, confirmar in botones:
             b = QPushButton(texto)
@@ -515,16 +551,16 @@ class PanelComandos(QWidget):
             b.clicked.connect(lambda _=False, n=nombre, c=confirmar, t=texto: self.mandar(n, c, t))
             caja.addWidget(b)
         self.linea = QLineEdit()
-        self.linea.setPlaceholderText("Telecomando…")
+        self.linea.setPlaceholderText("Telecommand…")
         self.linea.returnPressed.connect(self.mandar_linea)
         caja.addWidget(self.linea, 1)
-        self.eco = label("Eco: —", negrita=True)
+        self.eco = label("CMD_ECHO: —", negrita=True)
         caja.addWidget(self.eco)
         self.eco.setVisible(mostrar_eco)  # en los híbridos el eco va en la franja
 
     def mandar(self, nombre: str, confirmar: bool, texto: str) -> None:
         if confirmar:
-            r = QMessageBox.question(self, "Confirmar", f"¿Mandar «{texto}»?")
+            r = QMessageBox.question(self, "Confirm", f"Send “{texto}”?")
             if r != QMessageBox.StandardButton.Yes:
                 return
         self.sim.telecomando(*nombre.split())
@@ -535,15 +571,15 @@ class PanelComandos(QWidget):
             self.linea.clear()
 
     def actualizar(self) -> None:
-        self.eco.setText(f"Eco: {texto_eco(self.sim.ultimo)}")
+        self.eco.setText(f"CMD_ECHO: {texto_eco(self.sim.ultimo)}")
 
 
 GRAFICOS_G7 = [
-    ("Altitud", "m", ["altitud"]),
-    ("Tensión", "V", ["tension_bateria"]),
-    ("Corriente", "A", ["corriente_bateria"]),
-    ("Aceleración", "m/s²", ["acel_x", "acel_y", "acel_z"]),
-    ("Velocidad de rotación", "°/s", ["rot_x", "rot_y", "rot_z"]),
+    ("ALT_BARO", "m", ["altitud"]),
+    ("BAT_VOLTAGE", "V", ["tension_bateria"]),
+    ("BAT_CURRENT", "A", ["corriente_bateria"]),
+    ("Acceleration", "m/s²", ["acel_x", "acel_y", "acel_z"]),
+    ("Rotation rate", "°/s", ["rot_x", "rot_y", "rot_z"]),
 ]
 
 
@@ -575,7 +611,7 @@ def indicador(titulo: str) -> tuple[QFrame, QLabel]:
 
 
 class VarianteA(QWidget):
-    nombre = "Franja + tabla + grilla"
+    nombre = "Strip + table + grid"
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__()
@@ -586,15 +622,8 @@ class VarianteA(QWidget):
 
         franja = QHBoxLayout()
         self.ind = {}
-        for clave, titulo in [
-            ("estado_fsw", "Estado FSW"),
-            ("tiempo_mision", "Tiempo de misión [s]"),
-            ("recibidos", "Recibidos"),
-            ("perdidos", "Perdidos"),
-            ("hora", "Hora UTC"),
-            ("alt_max", "Altitud máx. [m]"),
-        ]:
-            caja, valor = indicador(titulo)
+        for clave in ["estado_fsw", "tiempo_mision", "recibidos", "perdidos", "hora", "alt_max"]:
+            caja, valor = indicador(con_unidad(clave))
             self.ind[clave] = valor
             franja.addWidget(caja)
         raiz.addLayout(franja)
@@ -626,7 +655,7 @@ class VarianteA(QWidget):
             self.curvas.update(c)
             grilla.addWidget(w, i // 3, i % 3)
         # sexto lugar: temperatura (G8), para cerrar la grilla de 3 × 2
-        w, c = grafico("Temperatura", "°C", ["temperatura"])
+        w, c = grafico("TEMPERATURE", "°C", ["temperatura"])
         self.curvas.update(c)
         grilla.addWidget(w, 1, 2)
         medio.addLayout(grilla, 1)
@@ -654,7 +683,7 @@ class VarianteA(QWidget):
 
 
 class VarianteB(QWidget):
-    nombre = "Altitud protagonista"
+    nombre = "Altitude first"
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__()
@@ -669,10 +698,10 @@ class VarianteB(QWidget):
         self.alt = label("—", negrita=True, pt=PT + 14)
         cabeza.addWidget(self.estado)
         cabeza.addStretch(1)
-        cabeza.addWidget(label("Altitud [m]", pt=PT))
+        cabeza.addWidget(label(con_unidad("altitud"), pt=PT))
         cabeza.addWidget(self.alt)
         izq.addLayout(cabeza)
-        w, self.c_alt = grafico("Altitud", "m", ["altitud"])
+        w, self.c_alt = grafico("ALT_BARO", "m", ["altitud"])
         izq.addWidget(w, 3)
 
         # Toda la telemetría en texto (G5) como registro: una fila por paquete,
@@ -689,17 +718,10 @@ class VarianteB(QWidget):
         der = QVBoxLayout()
         cifras = QGridLayout()
         self.ind = {}
-        for i, (clave, titulo) in enumerate(
-            [
-                ("tiempo_mision", "Tiempo [s]"),
-                ("hora", "Hora UTC"),
-                ("recibidos", "Recibidos"),
-                ("perdidos", "Perdidos"),
-                ("temperatura", "Temp. [°C]"),
-                ("gps", "GPS [°]"),
-            ]
+        for i, clave in enumerate(
+            ["tiempo_mision", "hora", "recibidos", "perdidos", "temperatura", "gps"]
         ):
-            caja, valor = indicador(titulo)
+            caja, valor = indicador("GPS [°]" if clave == "gps" else con_unidad(clave))
             if clave == "gps":
                 valor.setFont(label(pt=PT).font())
             self.ind[clave] = valor
@@ -728,7 +750,7 @@ class VarianteB(QWidget):
         self.ind["temperatura"].setText(fmt("temperatura", p["temperatura"]))
         self.ind["gps"].setText(
             f"{fmt('gps_latitud', p['gps_latitud'])}  {fmt('gps_longitud', p['gps_longitud'])}"
-            f"  ({p['gps_satelites']} sat.)"
+            f"  ({p['gps_satelites']} sats)"
         )
         refrescar_curvas(s, self.c_alt)
         refrescar_curvas(s, self.curvas)
@@ -786,7 +808,7 @@ class Tarjeta(QFrame):
 
 
 class VarianteC(QWidget):
-    nombre = "Tablero por subsistema"
+    nombre = "Subsystem board"
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__()
@@ -796,7 +818,7 @@ class VarianteC(QWidget):
         g.setSpacing(4)
         self.tarjetas = [
             Tarjeta(
-                "Misión",
+                "Mission",
                 [
                     "estado_fsw",
                     "contador",
@@ -808,24 +830,24 @@ class VarianteC(QWidget):
                 ],
             ),
             Tarjeta(
-                "Vuelo",
+                "Flight",
                 ["altitud", "presion", "temperatura"],
-                ("Altitud", "m", ["altitud"]),
+                ("ALT_BARO", "m", ["altitud"]),
             ),
             Tarjeta(
-                "Energía",
+                "Power",
                 ["tension_bateria", "corriente_bateria"],
-                ("Tensión", "V", ["tension_bateria"]),
+                ("BAT_VOLTAGE", "V", ["tension_bateria"]),
             ),
             Tarjeta(
-                "Aceleración",
+                "Acceleration",
                 ["acel_x", "acel_y", "acel_z"],
-                ("Aceleración", "m/s²", ["acel_x", "acel_y", "acel_z"]),
+                ("Acceleration", "m/s²", ["acel_x", "acel_y", "acel_z"]),
             ),
             Tarjeta(
-                "Rotación",
+                "Rotation rate",
                 ["rot_x", "rot_y", "rot_z"],
-                ("Rotación", "°/s", ["rot_x", "rot_y", "rot_z"]),
+                ("Rotation rate", "°/s", ["rot_x", "rot_y", "rot_z"]),
             ),
             Tarjeta(
                 "GPS",
@@ -836,7 +858,7 @@ class VarianteC(QWidget):
         energia = self.tarjetas[2]
         w = energia.findChild(pg.PlotWidget)
         energia.curvas["corriente_bateria"] = w.plot(pen=pg.mkPen(COLORES["dos"], width=TRAZO))
-        w.setTitle("<b>Tensión [V] y corriente [A]</b>", size=f"{PT}pt")
+        w.setTitle("<b>BAT_VOLTAGE [V] and BAT_CURRENT [A]</b>", size=f"{PT}pt")
 
         g.addWidget(self.tarjetas[0], 0, 0)
         g.addWidget(self.tarjetas[1], 0, 1, 1, 2)
@@ -847,7 +869,7 @@ class VarianteC(QWidget):
         comandos.setFrameShape(QFrame.Shape.StyledPanel)
         cv = QVBoxLayout(comandos)
         cv.setContentsMargins(4, 4, 4, 4)
-        cv.addWidget(label("Telecomandos", negrita=True, pt=PT + 2))
+        cv.addWidget(label("Telecommands", negrita=True, pt=PT + 2))
         self.comandos = PanelComandos(sim, vertical=True)
         cv.addWidget(self.comandos)
         g.addWidget(comandos, 0, 3)
@@ -870,8 +892,8 @@ class VarianteC(QWidget):
 
 # --- variantes D, E y F: híbridos A + C (ronda 2 de la #7) ----------------
 
+# Formas cortas donde la etiqueta entera no entra; la etiqueta va en el tooltip.
 ETIQUETA_GCS = {
-    "vel_vertical": "Vel. vertical [m/s]",
     **{f"acel_{e}": f"{e} [m/s²]" for e in "xyz"},
     **{f"rot_{e}": f"{e} [°/s]" for e in "xyz"},
 }
@@ -903,23 +925,23 @@ def estado_gcs(sim: Simulador, widget: QWidget) -> list[tuple[str, str, str]]:
     """Las cuatro condiciones de la GCS: (título, texto, nivel)."""
     sin_rx = sim.reloj - sim.ultimo_rx
     if sin_rx > 3:
-        enlace = ("Enlace", f"CORTADO hace {sin_rx} s", "error")
+        enlace = ("Link", f"LINK LOST {fmt('', sin_rx)} s", "error")
     else:
-        enlace = ("Enlace", f"{sim.rssi:.0f} dBm · {sim.snr:.1f} dB", "ok")
+        enlace = ("Link", f"{sim.rssi:.0f} dBm · {sim.snr:.1f} dB", "ok")
     if sim.pendrive:
-        pendrive = ("Pendrive", "AVUTARDO", "ok")
+        pendrive = ("USB drive", "AVUTARDO", "ok")
     else:
-        pendrive = ("Pendrive", "SIN PENDRIVE", "error")
+        pendrive = ("USB drive", "NO USB DRIVE", "error")
     if FORMATO.get("provisorio"):
-        formato = ("Formato", "PROVISORIO", "aviso")
+        formato = ("Format", "PROVISIONAL", "aviso")
     else:
-        formato = ("Formato", f"v{FORMATO.get('version', '?')}", "ok")
+        formato = ("Format", f"v{FORMATO.get('version', '?')}", "ok")
     geo = widget.screen().availableGeometry()
     ancho, alto = geo.width(), geo.height()
     if ancho >= 1366 and alto >= 768:
-        pantalla = ("Pantalla", f"{ancho}×{alto}", "ok")
+        pantalla = ("Screen", f"{ancho}×{alto}", "ok")
     else:
-        pantalla = ("Pantalla", f"BAJA {ancho}×{alto}", "aviso")
+        pantalla = ("Screen", f"LOW {ancho}×{alto}", "aviso")
     return [enlace, pendrive, formato, pantalla]
 
 
@@ -927,14 +949,14 @@ def texto_banda(sim: Simulador) -> tuple[str, str]:
     """La nota de la velocidad vertical: calculada en la GCS, contra C3 o C4."""
     estado = sim.ultimo["estado_fsw"]
     if estado not in BANDA:
-        return "Vel. vertical calculada en la GCS (no es un campo del formato)", "nada"
+        return "Vertical speed calculated by the GCS (not a telemetry field)", "nada"
     objetivo, tol, req = BANDA[estado]
     bajada = -sim.vel_vertical
     nivel = "ok" if abs(bajada - objetivo) <= tol else "error"
-    marca = "dentro" if nivel == "ok" else "FUERA"
+    marca = "in range" if nivel == "ok" else "OUT OF RANGE"
     return (
-        f"Bajada {bajada:.1f} m/s · esperada {objetivo} ± {tol} ({req}): {marca}"
-        " · calculada en la GCS",
+        f"Descent rate {bajada:.1f} m/s · expected {objetivo} ± {tol} ({req}): {marca}"
+        " · calculated by the GCS",
         nivel,
     )
 
@@ -977,12 +999,15 @@ class TarjetaH(QFrame):
                 eje = nombre[-1]
                 self.prefijos[nombre] = f"<span style='color:{COLORES[eje]}'>{eje}</span>&nbsp;"
                 val = label("—", negrita=True)
+                val.setToolTip(con_unidad(nombre))
                 self.valores[nombre] = val
                 grilla.addWidget(val, 0, i)
                 grilla.setColumnStretch(i, 1)
                 continue
             f, c = i % por_col, (i // por_col) * 2
-            grilla.addWidget(label(ETIQUETA_GCS.get(nombre) or con_unidad(nombre)), f, c)
+            rotulo = label(ETIQUETA_GCS.get(nombre) or con_unidad(nombre))
+            rotulo.setToolTip(con_unidad(nombre))
+            grilla.addWidget(rotulo, f, c)
             val = label("—", negrita=True, alinear=Qt.AlignmentFlag.AlignRight)
             self.valores[nombre] = val
             grilla.addWidget(val, f, c + 1)
@@ -1015,9 +1040,7 @@ class TarjetaH(QFrame):
     def poner_modo(self, modo: str) -> None:
         self.modo = modo
         if self.boton is not None:
-            self.boton.setText(
-                f"En vivo ({HISTORIA} s)" if modo == "vivo" else "Histórico (misión)"
-            )
+            self.boton.setText(f"Live ({HISTORIA} s)" if modo == "vivo" else "History (mission)")
             self.boton.setStyleSheet(
                 "" if modo == "vivo" else "QPushButton { background: #1f4e9c; color: white; }"
             )
@@ -1036,28 +1059,20 @@ class TarjetaH(QFrame):
 class Franja(QWidget):
     """Arriba de todo: estado, tiempos, contadores, eco y el toggle global."""
 
-    CLAVES = [
-        ("estado_fsw", "Estado FSW"),
-        ("tiempo_mision", "Tiempo de misión [s]"),
-        ("hora", "Hora UTC"),
-        ("recibidos", "Recibidos"),
-        ("perdidos", "Perdidos"),
-        ("descartados", "Descartados"),
-        ("eco", "Eco del comando"),
-    ]
+    CLAVES = ["estado_fsw", "tiempo_mision", "hora", "recibidos", "perdidos", "descartados", "eco"]
 
     def __init__(self, con_estado: bool = True) -> None:
         super().__init__()
         h = QHBoxLayout(self)
         h.setContentsMargins(0, 0, 0, 0)
         self.ind = {}
-        for clave, titulo in self.CLAVES:
+        for clave in self.CLAVES:
             if clave == "estado_fsw" and not con_estado:
                 continue
-            caja, valor = indicador(titulo)
+            caja, valor = indicador(con_unidad(clave))
             self.ind[clave] = valor
             h.addWidget(caja, 1)
-        self.toggle = QPushButton("Todos: En vivo")
+        self.toggle = QPushButton("All: Live")
         self.toggle.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.toggle.setMinimumHeight(48)
         h.addWidget(self.toggle)
@@ -1095,22 +1110,22 @@ class Hibrido(QWidget):
         vuelo = ["altitud", "vel_vertical", "presion", "temperatura"]
         self.t = {
             "vuelo": self.clase_tarjeta(
-                "Vuelo y GPS" if self.gps_en_vuelo else "Vuelo",
+                "Flight and GPS" if self.gps_en_vuelo else "Flight",
                 vuelo + (gps if self.gps_en_vuelo else []),
-                [("Altitud", "m", ["altitud"])],
+                [("ALT_BARO", "m", ["altitud"])],
                 columnas=2,
             ),
             "energia": self.tarjeta_energia(),
             "acel": self.clase_tarjeta(
-                "Aceleración",
+                "Acceleration",
                 ["acel_x", "acel_y", "acel_z"],
-                [("Aceleración", "m/s²", ["acel_x", "acel_y", "acel_z"])],
+                [("Acceleration", "m/s²", ["acel_x", "acel_y", "acel_z"])],
                 columnas=self.columnas_xyz,
             ),
             "rot": self.clase_tarjeta(
-                "Rotación",
+                "Rotation rate",
                 ["rot_x", "rot_y", "rot_z"],
-                [("Velocidad de rotación", "°/s", ["rot_x", "rot_y", "rot_z"])],
+                [("Rotation rate", "°/s", ["rot_x", "rot_y", "rot_z"])],
                 columnas=self.columnas_xyz,
             ),
         }
@@ -1121,9 +1136,12 @@ class Hibrido(QWidget):
     def tarjeta_energia(self) -> QFrame:
         """La tarjeta de energía de las rondas 2 a 4; la ronda 5 la reemplaza."""
         return self.clase_tarjeta(
-            "Energía",
+            "Power",
             ["tension_bateria", "corriente_bateria"],
-            [("Tensión", "V", ["tension_bateria"]), ("Corriente", "A", ["corriente_bateria"])],
+            [
+                ("BAT_VOLTAGE", "V", ["tension_bateria"]),
+                ("BAT_CURRENT", "A", ["corriente_bateria"]),
+            ],
             columnas=2,
         )
 
@@ -1131,8 +1149,8 @@ class Hibrido(QWidget):
         self.modo_global = "historico" if self.modo_global == "vivo" else "vivo"
         for t in self.t.values():
             t.poner_modo(self.modo_global)
-        texto = "En vivo" if self.modo_global == "vivo" else "Histórico"
-        self.franja.toggle.setText(f"Todos: {texto}")
+        texto = "Live" if self.modo_global == "vivo" else "History"
+        self.franja.toggle.setText(f"All: {texto}")
 
     def actualizar(self) -> None:
         s = self.sim
@@ -1174,7 +1192,7 @@ class Hibrido(QWidget):
 
 
 class VarianteD(Hibrido):
-    nombre = "Híbrido: chips de estado"
+    nombre = "Hybrid: status chips"
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__(sim)
@@ -1201,7 +1219,7 @@ class VarianteD(Hibrido):
 
 
 class VarianteE(Hibrido):
-    nombre = "Híbrido: fases + pie de estado"
+    nombre = "Hybrid: phases + status footer"
     con_estado = False  # el estado lo cuenta la barra de fases
 
     def __init__(self, sim: Simulador) -> None:
@@ -1226,7 +1244,7 @@ class VarianteE(Hibrido):
         caja.setFixedWidth(250)
         cv = QVBoxLayout(caja)
         cv.setContentsMargins(4, 4, 4, 4)
-        cv.addWidget(label("Telecomandos", negrita=True, pt=PT + 2))
+        cv.addWidget(label("Telecommands", negrita=True, pt=PT + 2))
         self.comandos = PanelComandos(sim, vertical=True, mostrar_eco=False)
         cv.addWidget(self.comandos)
         cv.addStretch(1)
@@ -1270,7 +1288,7 @@ class VarianteE(Hibrido):
 
 
 class VarianteF(Hibrido):
-    nombre = "Híbrido: línea de avisos"
+    nombre = "Hybrid: warning line"
     gps_en_vuelo = True
 
     def __init__(self, sim: Simulador) -> None:
@@ -1279,7 +1297,7 @@ class VarianteF(Hibrido):
         raiz.setContentsMargins(4, 4, 4, 4)
         raiz.setSpacing(4)
         raiz.addWidget(self.franja)
-        self.linea = label("Sin avisos", negrita=True)
+        self.linea = label("No warnings", negrita=True)
         self.linea.setFixedHeight(32)
         raiz.addWidget(self.linea)
         g = QGridLayout()
@@ -1300,7 +1318,7 @@ class VarianteF(Hibrido):
     def actualizar_avisos(self, condiciones) -> None:
         malos = [(t, x, n) for t, x, n in condiciones if n != "ok"]
         if not malos:
-            self.linea.setText("Sin avisos")
+            self.linea.setText("No warnings")
             nivel = "nada"
         else:
             self.linea.setText("   ▲   ".join(f"{t}: {x}" for t, x, _ in malos))
@@ -1310,7 +1328,7 @@ class VarianteF(Hibrido):
 
 # --- variante G: lo elegido en la ronda 2 de la #7 ------------------------
 
-VENTANAS = [("30 s", 30), ("60 s", 60), ("120 s", 120), ("Misión", None)]
+VENTANAS = [("30 s", 30), ("60 s", 60), ("120 s", 120), ("Mission", None)]
 TRANSICION = 5  # s en ámbar tras un cambio de estado
 
 
@@ -1390,7 +1408,7 @@ class TarjetaRecorrido(QFrame):
         v.setContentsMargins(6, 4, 6, 4)
         v.setSpacing(2)
         cab = QHBoxLayout()
-        self.titulo = label("Recorrido", negrita=True, pt=PT + 2)
+        self.titulo = label("Ground track", negrita=True, pt=PT + 2)
         cab.addWidget(self.titulo)
         cab.addStretch(1)
         self.boton = QPushButton("QR")
@@ -1404,7 +1422,7 @@ class TarjetaRecorrido(QFrame):
         fuente = QFont()
         fuente.setPointSize(PT)
         fuente.setBold(True)
-        for lado, texto in (("left", "Norte [m]"), ("bottom", "Este [m]")):
+        for lado, texto in (("left", "North [m]"), ("bottom", "East [m]")):
             eje = self.plot.getAxis(lado)
             eje.setPen(pg.mkPen("k", width=2))
             eje.setTextPen("k")
@@ -1439,7 +1457,7 @@ class TarjetaRecorrido(QFrame):
     def alternar(self) -> None:
         ver_qr = self.pila.currentIndex() == 0
         self.pila.setCurrentIndex(1 if ver_qr else 0)
-        self.boton.setText("Mapa" if ver_qr else "QR")
+        self.boton.setText("Map" if ver_qr else "QR")
 
     def poner_modo(self, modo) -> None:
         pass  # el recorrido es siempre la misión entera
@@ -1468,7 +1486,7 @@ class TarjetaRecorrido(QFrame):
                 lado = max(80, min(self.pila.width(), self.pila.height() - 30))
                 px = pixmap_qr(texto, lado)
                 if px is None:
-                    self.qr.setText("(falta segno:\nuv run --with segno ...)")
+                    self.qr.setText("(segno missing:\nuv run --with segno ...)")
                 else:
                     self.qr.setPixmap(px)
             self.coords.setText(f"{lat:.6f}\n{lon:.6f}")
@@ -1479,7 +1497,7 @@ class TarjetaRecorrido(QFrame):
 
 
 class VarianteG(Hibrido):
-    nombre = "Ronda 2: fases + pie, Vuelo y GPS, recorrido"
+    nombre = "Round 2: phases + footer, flight and GPS, ground track"
     gps_en_vuelo = True
     con_estado = False  # el estado lo cuenta la barra de fases
     clase_tarjeta = TarjetaG
@@ -1492,7 +1510,7 @@ class VarianteG(Hibrido):
         self.t["recorrido"] = TarjetaRecorrido()
         # El toggle global elige la ventana de todas las tarjetas a la vez.
         self.franja.toggle.hide()
-        self.global_ = combo_ventana("Todos: ")
+        self.global_ = combo_ventana("All: ")
         self.global_.setMinimumHeight(48)
         self.global_.currentIndexChanged.connect(
             lambda _: [t.poner_modo(self.global_.currentData()) for t in self.t.values()]
@@ -1524,7 +1542,7 @@ class VarianteG(Hibrido):
         caja.setStyleSheet("#comandos { border: 2px solid #555; border-radius: 4px; }")
         cv = QVBoxLayout(caja)
         cv.setContentsMargins(4, 4, 4, 4)
-        cv.addWidget(label("Telecomandos", negrita=True, pt=PT + 2))
+        cv.addWidget(label("Telecommands", negrita=True, pt=PT + 2))
         self.comandos = self.panel_comandos(sim)
         cv.addWidget(self.comandos)
         columna.addWidget(caja)
@@ -1573,7 +1591,7 @@ class VarianteG(Hibrido):
             else:
                 nivel = "ok" if abs(bajada - objetivo) <= tol else "error"
             val.setText(f"{s.vel_vertical:.1f} · {req}")
-            val.setToolTip(f"Esperada {objetivo} ± {tol} m/s de bajada ({req})")
+            val.setToolTip(f"Expected descent rate {objetivo} ± {tol} m/s ({req})")
             val.setStyleSheet(NIVEL[nivel] + "padding: 0px 4px;")
         else:
             val.setStyleSheet("")
@@ -1598,7 +1616,7 @@ class VarianteG(Hibrido):
 class VarianteG2(VarianteG):
     """Ronda 3, Q2: el Recorrido baja a la columna de telecomandos."""
 
-    nombre = "Ronda 3: Recorrido bajo los telecomandos"
+    nombre = "Round 3: ground track under telecommands"
     columnas_xyz = 0  # ronda 4: x, y, z en una línea, la unidad en el título
 
     def __init__(self, sim: Simulador) -> None:
@@ -1620,7 +1638,7 @@ class VarianteG2(VarianteG):
 class VarianteG3(VarianteG):
     """Ronda 3, Q2: Vuelo y GPS deja de ser alta y el Recorrido va debajo."""
 
-    nombre = "Ronda 3: Recorrido bajo Vuelo y GPS"
+    nombre = "Round 3: ground track under flight and GPS"
 
     def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
         g.addWidget(self.t["vuelo"], 0, 0)
@@ -1645,8 +1663,6 @@ CANALES = [  # (tensión, corriente) de cada canal del INA3221
     ("tension_3v3", "corriente_3v3"),
     ("tension_panel", "corriente_panel"),
 ]
-ETIQUETA = {c["nombre"]: c["etiqueta"] for c in CAMPOS}
-ETIQUETA["rendimiento"] = "BUCK_EFFICIENCY"  # lo calcula la GCS: no es un campo
 COLOR_CANAL = {"bateria": COLORES["uno"], "3v3": COLORES["dos"], "panel": "#555"}
 
 
@@ -1656,6 +1672,14 @@ def canal(nombre: str) -> str:
 
 def corto(nombre: str) -> str:
     return ETIQUETA[nombre].split("_")[0]  # BAT_VOLTAGE → BAT
+
+
+def cabeza_canal(tension: str, **kw) -> QLabel:
+    """La forma corta del canal (BAT), con las etiquetas enteras en el tooltip."""
+    lb = label(corto(tension), **kw)
+    corriente = tension.replace("tension_", "corriente_")
+    lb.setToolTip(f"{con_unidad(tension)}, {con_unidad(corriente)}")
+    return lb
 
 
 def rendimiento(d: dict) -> float:
@@ -1681,7 +1705,7 @@ def valor_energia(nombre: str, d: dict) -> float:
     return d.get(nombre, NAN)
 
 
-def fmt_energia(nombre: str, valor: float, con_unidad: bool = True) -> str:
+def fmt_energia(nombre: str, valor: float, mostrar_unidad: bool = True) -> str:
     """Tensiones con 2 decimales, corrientes y potencias con 3, % sin decimales."""
     if math.isnan(valor):
         return "—"
@@ -1692,8 +1716,8 @@ def fmt_energia(nombre: str, valor: float, con_unidad: bool = True) -> str:
         "potencia": (2, "W"),
         "rendimiento": (0, "%"),
     }[tipo]
-    texto = f"{valor:.{dec}f}"
-    return f"{texto} {unidad}" if con_unidad else texto
+    texto = agrupar(f"{valor:.{dec}f}")
+    return f"{texto} {unidad}" if mostrar_unidad else texto
 
 
 def plot_energia(alto_minimo: int = 70) -> pg.PlotWidget:
@@ -1755,7 +1779,7 @@ class TarjetaEnergia(QFrame):
         v.setContentsMargins(6, 4, 6, 4)
         v.setSpacing(2)
         cab = QHBoxLayout()
-        cab.addWidget(label("Energía", negrita=True, pt=PT + 2))
+        cab.addWidget(label("Power", negrita=True, pt=PT + 2))
         cab.addStretch(1)
         self.combo = combo_ventana()
         self.combo.currentIndexChanged.connect(lambda _: self.poner_modo(self.combo.currentData()))
@@ -1772,10 +1796,10 @@ class TarjetaEnergia(QFrame):
     def armar(self, v: QVBoxLayout) -> None:
         raise NotImplementedError
 
-    def valor(self, nombre: str, prefijo: str = "", con_unidad: bool = True, **kw) -> QLabel:
+    def valor(self, nombre: str, prefijo: str = "", mostrar_unidad: bool = True, **kw) -> QLabel:
         lb = label("—", negrita=True, **kw)
-        lb.setToolTip(ETIQUETA.get(nombre, nombre))
-        self.valores[nombre] = (lb, prefijo, con_unidad)
+        lb.setToolTip(con_unidad(nombre))
+        self.valores[nombre] = (lb, prefijo, mostrar_unidad)
         return lb
 
     def fila_abajo(self) -> QHBoxLayout:
@@ -1783,11 +1807,11 @@ class TarjetaEnergia(QFrame):
         otras curvas."""
         h = QHBoxLayout()
         h.setSpacing(10)
-        h.addWidget(label(corto("tension_panel")))  # SOLAR, una sola vez
+        h.addWidget(cabeza_canal("tension_panel"))  # SOLAR, una sola vez
         h.addWidget(self.valor("tension_panel"))
         h.addWidget(self.valor("corriente_panel"))
         h.addStretch(1)
-        h.addWidget(label(ETIQUETA["rendimiento"]))
+        h.addWidget(label("Buck efficiency"))
         h.addWidget(self.valor("rendimiento"))
         return h
 
@@ -1805,8 +1829,8 @@ class TarjetaEnergia(QFrame):
             vista.enableAutoRange()
 
     def actualizar(self, sim: Simulador, datos: dict) -> None:
-        for nombre, (lb, prefijo, con_unidad) in self.valores.items():
-            lb.setText(prefijo + fmt_energia(nombre, valor_energia(nombre, datos), con_unidad))
+        for nombre, (lb, prefijo, mostrar_unidad) in self.valores.items():
+            lb.setText(prefijo + fmt_energia(nombre, valor_energia(nombre, datos), mostrar_unidad))
         if self.modo is None and sim.t_lanzamiento is not None:
             inicio = sim.t_lanzamiento
         else:
@@ -1857,7 +1881,7 @@ class EnergiaPorCanal(TarjetaEnergia):
             h.setSpacing(6)
             col = QVBoxLayout()
             col.setSpacing(0)
-            col.addWidget(label(corto(tension), negrita=True, pt=PT + 2))
+            col.addWidget(cabeza_canal(tension, negrita=True, pt=PT + 2))
             col.addWidget(self.valor(tension, f"<span style='color:{cv}'>V</span>&nbsp;"))
             col.addWidget(self.valor(corriente, f"<span style='color:{ca}'>A</span>&nbsp;"))
             col.addStretch(1)
@@ -1920,11 +1944,11 @@ class EnergiaNumeros(TarjetaEnergia):
             tabla.addWidget(label(marca(tension, corto(tension)), negrita=True), f, 0)
             potencia = f"potencia_{canal(tension)}"
             for c, nombre in enumerate((tension, corriente, potencia), start=1):
-                tabla.addWidget(self.valor(nombre, con_unidad=False, alinear=derecha), f, c)
+                tabla.addWidget(self.valor(nombre, mostrar_unidad=False, alinear=derecha), f, c)
         izq.addLayout(tabla)
         izq.addStretch(1)
         rend = QHBoxLayout()
-        rend.addWidget(label(ETIQUETA["rendimiento"]))
+        rend.addWidget(label("Buck efficiency"))
         rend.addStretch(1)
         rend.addWidget(self.valor("rendimiento", pt=PT + 8))
         izq.addLayout(rend)
@@ -1943,21 +1967,21 @@ class EnergiaNumeros(TarjetaEnergia):
 
 
 class VarianteG2A(VarianteG2):
-    nombre = "Ronda 5 (#23): energía por magnitud"
+    nombre = "Round 5 (#23): power by quantity"
 
     def tarjeta_energia(self) -> QFrame:
         return EnergiaPorMagnitud()
 
 
 class VarianteG2B(VarianteG2):
-    nombre = "Ronda 5 (#23): energía por canal"
+    nombre = "Round 5 (#23): power by channel"
 
     def tarjeta_energia(self) -> QFrame:
         return EnergiaPorCanal()
 
 
 class VarianteG2C(VarianteG2):
-    nombre = "Ronda 5 (#23): energía, números primero"
+    nombre = "Round 5 (#23): power, numbers first"
 
     def tarjeta_energia(self) -> QFrame:
         return EnergiaNumeros()
@@ -1972,7 +1996,7 @@ ORDEN_ENLACE = [
     "SNR",
     "Noise floor (est.)",
     "PER",
-    "TX power",
+    "TX_POWER",
     "Received",
     "Transmitted",
     "Lost",
@@ -1985,7 +2009,7 @@ MAS_ANCHO = {  # el valor más ancho de cada uno: así la franja no salta
     "SNR": "-20.0 dB",
     "Noise floor (est.)": "-120 dBm",
     "PER": "99.9 %",
-    "TX power": "22 dBm",
+    "TX_POWER": "22 dBm",
 }
 
 
@@ -1996,7 +2020,7 @@ def estado_enlace(sim: Simulador) -> tuple[str, str]:
         return "NO LINK", "nada"
     sin_rx = sim.reloj - sim.ultimo_rx
     if sin_rx > LOST_TRAS:
-        return f"LINK LOST {sin_rx} s", "error"
+        return f"LINK LOST {fmt('', sin_rx)} s", "error"
     return "LINK OK", "ok"
 
 
@@ -2017,7 +2041,7 @@ def valores_enlace(sim: Simulador) -> dict[str, str]:
         "SNR": f"{sim.snr:.1f} dB" if hay else "—",
         "Noise floor (est.)": f"{noise_floor(sim.rssi, sim.snr):.0f} dBm" if hay else "—",
         "PER": f"{100 * sim.perdidos / transmitidos:.1f} %" if hay else "—",
-        "TX power": f"{potencia} dBm" if potencia is not None else "—",
+        "TX_POWER": f"{potencia} dBm" if potencia is not None else "—",
         "Received": fmt("", sim.recibidos),
         "Transmitted": fmt("", transmitidos) if hay else "—",
         "Lost": fmt("", sim.perdidos),
@@ -2101,7 +2125,7 @@ class FranjaSinConteos(Franja):
     """La franja sin recibidos, perdidos ni descartados: pasan a la sección de
     enlace (cada dato una vez, ronda 2)."""
 
-    CLAVES = [(c, t) for c, t in Franja.CLAVES if c not in ("recibidos", "perdidos", "descartados")]
+    CLAVES = [c for c in Franja.CLAVES if c not in ("recibidos", "perdidos", "descartados")]
 
     def actualizar(self, datos: dict) -> None:
         for clave, valor in self.ind.items():
@@ -2178,7 +2202,7 @@ class VarianteEnlace(VarianteG2B):
     def actualizar_avisos(self, condiciones) -> None:
         texto, nivel = estado_enlace(self.sim)
         condiciones = list(condiciones)
-        condiciones[0] = ("Enlace", texto, "error") if nivel == "error" else None
+        condiciones[0] = ("Link", texto, "error") if nivel == "error" else None
         colores = {"ok": "#145a32", "aviso": "#8a5a0b", "error": "#b03a2e"}
         for lb, cond in zip(self.pie, condiciones, strict=True):
             if cond is None:  # el enlace sano no se repite en el pie
@@ -2196,7 +2220,7 @@ class VarianteEnlace(VarianteG2B):
 
 
 class VarianteL1(VarianteEnlace):
-    nombre = "Ronda 6 (#24): enlace en la columna derecha"
+    nombre = "Round 6 (#24): link in the right column"
 
     def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
         self.t["enlace"] = TarjetaEnlace("columna")
@@ -2206,7 +2230,7 @@ class VarianteL1(VarianteEnlace):
 
 
 class VarianteL2(VarianteEnlace):
-    nombre = "Ronda 6 (#24): enlace como franja"
+    nombre = "Round 6 (#24): link as a strip"
 
     def __init__(self, sim: Simulador) -> None:
         super().__init__(sim)
@@ -2218,7 +2242,7 @@ class VarianteL2(VarianteEnlace):
 
 
 class VarianteL3(VarianteEnlace):
-    nombre = "Ronda 6 (#24): enlace bajo Vuelo y GPS"
+    nombre = "Round 6 (#24): link under flight and GPS"
     ancho_comandos = ANCHO_L3
 
     def ubicar(self, g: QGridLayout, columna: QVBoxLayout) -> None:
@@ -2287,8 +2311,8 @@ class Selector(QFrame):
 class Ventana(QMainWindow):
     def __init__(self, inicial: str) -> None:
         super().__init__()
-        nota = "Datos simulados" + ("; formato provisorio" if FORMATO.get("provisorio") else "")
-        self.setWindowTitle(f"Avutardo GCS — PROTOTIPO — {nota}")
+        nota = "Simulated data" + ("; provisional format" if FORMATO.get("provisorio") else "")
+        self.setWindowTitle(f"Avutardo GCS — PROTOTYPE — {nota}")
         self.sim = Simulador()
         self.claves = list(VARIANTES)
         self.actual = inicial
@@ -2331,9 +2355,9 @@ class Ventana(QMainWindow):
         self.actualizar_titulo()
 
     def actualizar_titulo(self) -> None:
-        nota = "Datos simulados" + ("; formato provisorio" if FORMATO.get("provisorio") else "")
-        marcha = "EN PAUSA" if self.pausado else f"×{self.velocidad}"
-        self.setWindowTitle(f"Avutardo GCS — PROTOTIPO — {nota} — {marcha}")
+        nota = "Simulated data" + ("; provisional format" if FORMATO.get("provisorio") else "")
+        marcha = "PAUSED" if self.pausado else f"×{self.velocidad}"
+        self.setWindowTitle(f"Avutardo GCS — PROTOTYPE — {nota} — {marcha}")
 
     def avisar(self, texto: str) -> None:
         self.statusBar().showMessage(texto, 3000)
@@ -2343,7 +2367,7 @@ class Ventana(QMainWindow):
         self.sim = Simulador(precarga=False)
         self.sim.reinicio = 10
         self.poner(self.actual)
-        self.avisar("Arranque en frío: 10 s sin paquetes")
+        self.avisar("Cold start: 10 s without packets")
 
     def refrescar(self) -> None:
         """Las variantes viejas necesitan un paquete; las de la ronda 6, no."""
@@ -2354,19 +2378,19 @@ class Ventana(QMainWindow):
         """F5: un vuelo nuevo desde STANDBY, en la misma variante."""
         self.sim = Simulador()
         self.poner(self.actual)
-        self.avisar("Vuelo reiniciado")
+        self.avisar("Flight restarted")
 
     def pausar(self) -> None:
         if isinstance(QApplication.focusWidget(), QLineEdit):
             return
         self.pausado = not self.pausado
         self.actualizar_titulo()
-        self.avisar("En pausa" if self.pausado else "En marcha")
+        self.avisar("Paused" if self.pausado else "Running")
 
     def acelerar(self) -> None:
         self.velocidad = {1: 5, 5: 10, 10: 1}[self.velocidad]
         self.actualizar_titulo()
-        self.avisar(f"Velocidad ×{self.velocidad}")
+        self.avisar(f"Speed ×{self.velocidad}")
 
     def saltar(self, fase: str) -> None:
         """1 a 5: hacia adelante corre el vuelo; hacia atrás, lo reinicia antes."""
@@ -2378,34 +2402,34 @@ class Ventana(QMainWindow):
             self.poner(self.actual)
         self.sim.saltar(fase)
         self.refrescar()
-        self.avisar(f"Salto a {fase}")
+        self.avisar(f"Jump to {fase}")
 
     def falla(self, que: str) -> None:
         s = self.sim
         if que == "rafaga":
             s.rafaga = 5
-            texto = "Ráfaga: se pierden los próximos 5 paquetes"
+            texto = "Burst: the next 5 packets are lost"
         elif que == "crc":
             s.crc_roto = 1
-            texto = "El próximo paquete llega con el CRC roto"
+            texto = "The next packet arrives with a bad CRC"
         elif que == "gps":
             s.sin_fix = not s.sin_fix
-            texto = "GPS sin fix" if s.sin_fix else "GPS con fix"
+            texto = "GPS without fix" if s.sin_fix else "GPS with fix"
         elif que == "bateria":
             s.bateria_baja = not s.bateria_baja
-            texto = "Batería baja" if s.bateria_baja else "Batería normal"
+            texto = "Low battery" if s.bateria_baja else "Battery normal"
         elif que == "ina":
             s.ina_sin_dato = not s.ina_sin_dato
-            texto = "BAT_CURRENT sin dato" if s.ina_sin_dato else "BAT_CURRENT con dato"
+            texto = "BAT_CURRENT with no data" if s.ina_sin_dato else "BAT_CURRENT with data"
         elif que == "ajeno":
             s.ajenos += 1
-            texto = "Llegó un paquete de otro equipo"
+            texto = "A packet from another team arrived (Foreign)"
         elif que == "debil":
             s.senal_debil = not s.senal_debil
-            texto = "Señal débil (SNR negativa)" if s.senal_debil else "Señal normal"
+            texto = "Weak signal (negative SNR)" if s.senal_debil else "Normal signal"
         else:
             s.reinicio = 3
-            texto = "Reinicio de la FSW: 3 s sin transmitir"
+            texto = "FSW reset: 3 s without transmitting"
         self.avisar(texto)
 
     def poner(self, clave: str) -> None:
@@ -2464,7 +2488,7 @@ class Ventana(QMainWindow):
         self.selector.show()
         destino = CAPTURAS / f"variante-{self.actual}.png"
         imagen.save(str(destino))
-        self.statusBar().showMessage(f"Captura: {destino}", 3000)
+        self.statusBar().showMessage(f"Screenshot: {destino}", 3000)
 
     def ubicar_selector(self) -> None:
         s = self.selector
