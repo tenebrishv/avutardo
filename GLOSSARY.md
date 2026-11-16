@@ -30,7 +30,7 @@ _Evitar_: confirmación de ejecución, acuse aparte
 Un telecomando que llegó pero el CanSat no ejecuta: otra versión del formato,
 código desconocido, parámetro fuera de rango o comando bloqueado en el modo o
 el estado actual.
-Viaja junto con el eco; un rechazado no se reintenta.
+Viaja junto con el eco; un rechazado no se reintenta. En pantalla, *REJECTED*.
 _Evitar_: fallido, perdido
 
 **Sin eco**:
@@ -71,6 +71,12 @@ La Heltec de tierra: reenvía cada paquete a la notebook sin interpretarlo y le
 agrega el RSSI y el SNR.
 _Evitar_: receptor, módem, gateway
 
+**Etiqueta**:
+El nombre en inglés de un campo, tal como lo define el formato
+(`BAT_VOLTAGE`); es el mismo en la pantalla, en el CSV y en la planilla de
+infraestructura.
+_Evitar_: nombre (ése es el identificador en español), título, rótulo
+
 ## Conteos
 
 **Contador de secuencia**:
@@ -82,36 +88,67 @@ _Evitar_: contador de paquetes, contador de transmitidos, número de paquete
 Los paquetes que la estación terrena aceptó y decodificó: forma y largo
 correctos, CRC válido, APID nuestro con el tipo TM y versión del formato
 conocida (G14). Un contador de secuencia repetido con datos nuevos también
-cuenta.
+cuenta. En pantalla, *Received*.
 _Evitar_: paquetes contados, contador de paquetes
 
 **Perdidos**:
 Los paquetes que faltan según los saltos del contador de secuencia entre dos
 recibidos, contando la vuelta de 16 383 a 0 (G8). Un descartado también deja
-un hueco, así que suma acá.
+un hueco, así que suma acá. En pantalla, *Lost*.
 _Evitar_: fallidos
 
 **Descartados**:
 Lo que llegó del puente y no se pudo decodificar: línea mal formada, CRC
 inválido o versión del formato desconocida. Va al log crudo. Un paquete de
-otro largo, de otro APID o con el tipo TC no es descartado sino ajeno.
+otro largo, de otro APID o con el tipo TC no es descartado sino ajeno. En pantalla,
+*Discarded*.
 _Evitar_: corruptos, rechazados, perdidos
 
 **Ajenos**:
 Lo que llegó del puente y no es nuestro: otro largo, otro APID o el tipo TC.
 Va al log crudo y tiene su propio conteo, que no se mezcla con recibidos,
-perdidos ni descartados: muestra que la estación filtra a los otros equipos.
+perdidos ni descartados: muestra que la estación filtra a los otros equipos. En pantalla, *Foreign*.
 _Evitar_: descartados, extraños, ruido
 
 **Transmitidos**:
 Los paquetes que el CanSat transmitió desde el primero que recibió la
-estación, según el contador de secuencia: los recibidos más los perdidos.
+estación, según el contador de secuencia: los recibidos más los perdidos. En pantalla,
+*Transmitted*.
 _Evitar_: enviados, contador de transmitidos
 
 **Enlace perdido**:
-La estación terrena lleva más de 3 s sin un recibido. Un perdido suelto no
-alcanza: el enlace sigue activo.
+La estación terrena lleva más de 3 s sin un recibido; en pantalla, *LINK
+LOST* y los segundos desde el último. Un perdido suelto no alcanza: el enlace
+sigue activo.
 _Evitar_: sin señal, desconectado
+
+**Sin enlace**:
+La estación terrena todavía no tuvo ningún recibido desde que arrancó; en
+pantalla, *NO LINK*. No es un enlace perdido: nunca hubo uno.
+_Evitar_: enlace perdido, desconectado
+
+**Piso de ruido**:
+El ruido que estima la estación terrena con el RSSI y el SNR del último
+recibido, calculado en potencia para que valga también con la SNR negativa;
+en pantalla, *Noise floor (est.)*.
+_Evitar_: ruido de fondo, RSSI menos SNR
+
+## Energía
+
+**Batería**:
+El pack 2S que alimenta al CanSat; sus tensión y corriente son las que pide
+G7. Una corriente positiva es descarga.
+_Evitar_: pack, pila
+
+**Barra de 3.3 V**:
+La salida del buck, de la que cuelga todo lo que va a bordo (salvo la baliza).
+_Evitar_: bus, riel, salida del DC-DC
+
+**Rendimiento del buck**:
+La potencia de la barra de 3.3 V dividida por la de la batería, paquete por
+paquete. Un valor de más del 100 % no se corrige: indica un problema de
+medición.
+_Evitar_: rendimiento del DC-DC, rendimiento del EPS, eficiencia
 
 ## Software de vuelo
 
