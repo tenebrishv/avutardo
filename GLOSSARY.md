@@ -109,9 +109,21 @@ estación, según el contador de secuencia: los recibidos más los perdidos.
 _Evitar_: enviados, contador de transmitidos
 
 **Enlace perdido**:
-La estación terrena lleva más de 3 s sin un recibido. Un perdido suelto no
-alcanza: el enlace sigue activo.
+La estación terrena lleva más de 3 s sin un recibido; en pantalla, *LINK
+LOST* y los segundos desde el último. Un perdido suelto no alcanza: el enlace
+sigue activo.
 _Evitar_: sin señal, desconectado
+
+**Sin enlace**:
+La estación terrena todavía no tuvo ningún recibido desde que arrancó; en
+pantalla, *NO LINK*. No es un enlace perdido: nunca hubo uno.
+_Evitar_: enlace perdido, desconectado
+
+**Piso de ruido**:
+El ruido que estima la estación terrena con el RSSI y el SNR del último
+recibido, calculado en potencia para que valga también con la SNR negativa;
+en pantalla, *Noise floor (est.)*.
+_Evitar_: ruido de fondo, RSSI menos SNR
 
 ## Energía
 
