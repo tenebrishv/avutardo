@@ -31,10 +31,26 @@ Ronda 3: lo elegido en la ronda 2, junto.
        x, y, z en una línea que hace de leyenda, con la unidad en el título
     G3 Como G, con Vuelo y GPS de una fila y el Recorrido debajo
 
+Ronda 5 (#23): tres variantes del bloque de energía, dentro de G2. Los tres
+canales del INA3221 (batería, barra de 3.3 V y panel) y el rendimiento del
+buck, calculado en la GCS paquete por paquete.
+
+    G2A Por magnitud     un gráfico de tensión y otro de corriente, cada uno
+                         con la batería y la barra; el valor al lado; panel y
+                         rendimiento en una fila abajo (lo que pide la #23)
+    G2B Por canal        una fila por canal: batería y barra, cada una con su
+                         gráfico de dos ejes (V a la izquierda, A a la derecha)
+    G2C Números primero  tabla canal × V, A, W con el rendimiento grande, y
+                         dos gráficos angostos al lado
+
+    Elegida: G2B (2026-11-15). Gráficos anchos y cada canal se lee entero;
+    G2A dejaba los gráficos en unos 90 px por el ancho de las etiquetas.
+
 Correr, desde `gcs/`:
 
-    uv run python prototipos/pantalla.py        # arranca en D
+    uv run python prototipos/pantalla.py        # arranca en G2B, la elegida
     uv run python prototipos/pantalla.py A      # arranca en A
+    uv run python prototipos/pantalla.py G2A    # la ronda 5 (#23)
 
 Teclas: ← y → cambian de variante, F11 alterna pantalla completa, F12 guarda
 una captura al doble de píxeles en `prototipos/capturas/` (como pide #4, Q6).
@@ -51,6 +67,8 @@ Para probar la simulación:
     F2        el próximo paquete llega con el CRC roto (descartado y perdido)
     F3        GPS sin fix (0 satélites, posición sin dato) / con fix
     F4        batería baja (1.5 V menos) / normal
+    Shift+F4  BAT_CURRENT sin dato / con dato (hueco en la curva, "—" en el
+              número y en el rendimiento)
     F10       reinicio de la FSW: 3 s sin transmitir, un paquete en BOOT y
               sigue en su estado; el contador y el tiempo de misión siguen
               (F1, F2, F5)
@@ -179,6 +197,12 @@ class Simulador:
         self.crc_roto = 0  # paquetes que quedan por llegar con el CRC roto
         self.sin_fix = False
         self.bateria_baja = False
+        self.ina_sin_dato = False  # BAT_CURRENT sin dato (Shift+F4)
+        # Energía (#23): el estado del perfil en el paso anterior (para ver el
+        # segundo en que libera el servo), cuándo aterrizó y el ángulo del panel.
+        self.estado_sim = "STANDBY"
+        self.t_aterrizaje: float | None = None
+        self.angulo_panel = 0.0
         self.reinicio = 0  # segundos que le faltan a la FSW para volver
         self.boot = False  # el próximo paquete sale en BOOT
         # Arranca con 40 s en la rampa y el lanzamiento a los 45 s, para que los
@@ -213,6 +237,8 @@ class Simulador:
         self.contador += 1
         tv = self.t - 45
         alt, estado = self._perfil(tv)
+        rot_z = random.gauss(0, 3) + (90 if 12 <= tv < 60 else 0)
+        energia = self._energia(estado, rot_z)
         if self.boot:  # el primer paquete después del reinicio
             estado = "BOOT"
             self.boot = False
@@ -225,7 +251,6 @@ class Simulador:
         g = 9.81
         empuje = 60 if 0 <= tv < 2 else 0
         golpe = 80 if 12 <= tv < 13 else 0
-        en_vuelo = estado in ("ASCENT", "DESCENT_1", "DESCENT_2")
         liberado = estado in ("DESCENT_2", "LANDED")
         # Los 32 campos de la v2, en el orden del .toml. Los campos con `valores`
         # (estado_fsw, modo…) y los códigos de telecomando van ya con su nombre:
@@ -242,13 +267,8 @@ class Simulador:
             "altitud": alt - self.offset_alt,
             "temperatura": 18.0 - 0.0065 * alt + r(0, 0.1),
             "humedad": round(45 + r(0, 0.5)),
-            # Energía
-            "tension_bateria": 7.9 - 0.002 * self.t - 1.5 * self.bateria_baja + r(0, 0.01),
-            "corriente_bateria": (0.42 if en_vuelo else 0.18) + r(0, 0.01),
-            "tension_3v3": 3.30 + r(0, 0.005),
-            "corriente_3v3": (0.15 if en_vuelo else 0.09) + r(0, 0.003),
-            "tension_panel": 5.5 + r(0, 0.05),
-            "corriente_panel": 0.08 + r(0, 0.005),
+            # Energía (#23)
+            **energia,
             # Navegación
             "gps_latitud": -53.7860 + 0.00002 * self.deriva + r(0, 0.000005),
             "gps_longitud": -67.7000 + 0.00003 * self.deriva + r(0, 0.000005),
@@ -260,7 +280,7 @@ class Simulador:
             "acel_z": g + empuje + golpe + r(0, 0.3),
             "rot_x": r(0, 3) + (40 * math.sin(tv) if 12 <= tv < 60 else 0),
             "rot_y": r(0, 3),
-            "rot_z": r(0, 3) + (90 if 12 <= tv < 60 else 0),
+            "rot_z": rot_z,
             # Descenso
             "estado_descenso2": "TRIGGERED" if liberado else "ARMED",
             "servo": 90 if liberado else 0,
@@ -308,6 +328,53 @@ class Simulador:
         self.rssi = -68 - alt / 25 + r(0, 1.5)
         self.snr = 10 - alt / 120 + r(0, 0.5)
         self.registro.append(",".join(fmt(c["nombre"], p[c["nombre"]]) for c in CAMPOS))
+
+    def _energia(self, estado: str, rot_z: float) -> dict:
+        """Los seis campos del INA3221 (#23). Corriente positiva = consumo.
+
+        La barra de 3.3 V sale de la tabla de consumos de la planilla (punto 65
+        de la PDR), con la Heltec al 57 % de TX: cierra con 4.64 Wh en 120 min.
+        Cada corriente es el promedio del segundo, no una muestra de la TX.
+        """
+        r = random.gauss
+        previo, self.estado_sim = self.estado_sim, estado
+        if estado == "LANDED" and self.t_aterrizaje is None:
+            self.t_aterrizaje = self.t
+        recien_aterrizado = estado == "LANDED" and self.t - self.t_aterrizaje < 30
+        if estado == "DESCENT_2" and previo == "DESCENT_1":
+            i33 = 1.33  # el segundo en que el servo libera el segundo descenso
+        elif estado in ("DESCENT_1", "DESCENT_2") or recien_aterrizado:
+            i33 = 1.03  # cámaras grabando (#31)
+        else:
+            i33 = 0.69  # reposo
+        i33 += r(0, 0.01)
+        v33 = 3.30 - 0.02 * i33 + r(0, 0.004)
+        # Batería 2S cargada: rendimiento cercano al 90 %, resistencia interna de
+        # unos 0.1 Ω y una descarga casi nula en el vuelo.
+        rend = 0.90 - 0.01 * (i33 - 0.69) + r(0, 0.004)
+        p_bat = v33 * i33 / rend
+        v_abierto = 8.25 - 0.00002 * self.t - 1.5 * self.bateria_baja
+        i_bat = p_bat / v_abierto
+        for _ in range(3):
+            i_bat = p_bat / (v_abierto - 0.1 * i_bat)
+        v_bat = v_abierto - 0.1 * i_bat + r(0, 0.003)
+        # Panel sobre 100 Ω, de juguete (unos 5 V / 50 mA de pico) hasta tener su
+        # hoja: adentro del cohete no ve luz, en el descenso gira con rot_z y en
+        # tierra queda fijo.
+        if estado in ("STANDBY", "ASCENT"):
+            v_panel = abs(r(0, 0.01))
+        else:
+            if estado != "LANDED":
+                self.angulo_panel += rot_z  # 1 s de giro
+            v_panel = max(0.0, 2.5 + 2.5 * math.cos(math.radians(self.angulo_panel)) + r(0, 0.03))
+        return {
+            "tension_bateria": v_bat,
+            "corriente_bateria": float("nan") if self.ina_sin_dato else i_bat,
+            "tension_3v3": v33,
+            "corriente_3v3": i33,
+            "tension_panel": v_panel,
+            "corriente_panel": v_panel / 100 + r(0, 0.0005),
+        }
 
     def saltar(self, estado: str) -> None:
         """Corre el vuelo hasta que el perfil llegue a `estado` (sólo hacia adelante)."""
@@ -999,12 +1066,7 @@ class Hibrido(QWidget):
                 [("Altitud", "m", ["altitud"])],
                 columnas=2,
             ),
-            "energia": self.clase_tarjeta(
-                "Energía",
-                ["tension_bateria", "corriente_bateria"],
-                [("Tensión", "V", ["tension_bateria"]), ("Corriente", "A", ["corriente_bateria"])],
-                columnas=2,
-            ),
+            "energia": self.tarjeta_energia(),
             "acel": self.clase_tarjeta(
                 "Aceleración",
                 ["acel_x", "acel_y", "acel_z"],
@@ -1021,6 +1083,15 @@ class Hibrido(QWidget):
         if not self.gps_en_vuelo:
             self.t["gps"] = self.clase_tarjeta("GPS", gps)
         self.t["vuelo"].nota.show()
+
+    def tarjeta_energia(self) -> QFrame:
+        """La tarjeta de energía de las rondas 2 a 4; la ronda 5 la reemplaza."""
+        return self.clase_tarjeta(
+            "Energía",
+            ["tension_bateria", "corriente_bateria"],
+            [("Tensión", "V", ["tension_bateria"]), ("Corriente", "A", ["corriente_bateria"])],
+            columnas=2,
+        )
 
     def alternar_global(self) -> None:
         self.modo_global = "historico" if self.modo_global == "vivo" else "vivo"
@@ -1528,6 +1599,334 @@ class VarianteG3(VarianteG):
         columna.addStretch(1)
 
 
+# --- ronda 5 (#23): el bloque de energía ----------------------------------
+
+NAN = float("nan")
+TENSIONES = ["tension_bateria", "tension_3v3"]
+CORRIENTES = ["corriente_bateria", "corriente_3v3"]
+CANALES = [  # (tensión, corriente) de cada canal del INA3221
+    ("tension_bateria", "corriente_bateria"),
+    ("tension_3v3", "corriente_3v3"),
+    ("tension_panel", "corriente_panel"),
+]
+ETIQUETA = {c["nombre"]: c["etiqueta"] for c in CAMPOS}
+ETIQUETA["rendimiento"] = "BUCK_EFFICIENCY"  # lo calcula la GCS: no es un campo
+COLOR_CANAL = {"bateria": COLORES["uno"], "3v3": COLORES["dos"], "panel": "#555"}
+
+
+def canal(nombre: str) -> str:
+    return nombre.rsplit("_", 1)[1]  # tension_bateria → bateria
+
+
+def corto(nombre: str) -> str:
+    return ETIQUETA[nombre].split("_")[0]  # BAT_VOLTAGE → BAT
+
+
+def rendimiento(d: dict) -> float:
+    """Potencia de la barra / potencia de la batería, en %, paquete por paquete.
+
+    Más del 100 % se muestra tal cual: indica un problema de medición. Sin dato
+    si falta alguno de los cuatro campos o la batería entrega menos de 0.1 W.
+    """
+    vb, ib = d.get("tension_bateria", NAN), d.get("corriente_bateria", NAN)
+    v3, i3 = d.get("tension_3v3", NAN), d.get("corriente_3v3", NAN)
+    if any(math.isnan(x) for x in (vb, ib, v3, i3)) or vb * ib < 0.1:
+        return NAN
+    return 100 * v3 * i3 / (vb * ib)
+
+
+def valor_energia(nombre: str, d: dict) -> float:
+    if nombre == "rendimiento":
+        return rendimiento(d)
+    if nombre.startswith("potencia_"):  # sólo G2C: V × A del canal
+        c = canal(nombre)
+        v, i = (d.get(n, NAN) for n in next(par for par in CANALES if canal(par[0]) == c))
+        return v * i
+    return d.get(nombre, NAN)
+
+
+def fmt_energia(nombre: str, valor: float, con_unidad: bool = True) -> str:
+    """Tensiones con 2 decimales, corrientes y potencias con 3, % sin decimales."""
+    if math.isnan(valor):
+        return "—"
+    tipo = nombre.split("_")[0]
+    dec, unidad = {
+        "tension": (2, "V"),
+        "corriente": (3, "A"),
+        "potencia": (2, "W"),
+        "rendimiento": (0, "%"),
+    }[tipo]
+    texto = f"{valor:.{dec}f}"
+    return f"{texto} {unidad}" if con_unidad else texto
+
+
+def plot_energia(alto_minimo: int = 70) -> pg.PlotWidget:
+    """Un gráfico sin título ni eje de tiempo rotulado, como los de G2."""
+    w = pg.PlotWidget()
+    fuente = QFont()
+    fuente.setPointSize(PT)
+    fuente.setBold(True)
+    for lado in ("left", "bottom"):
+        eje = w.getAxis(lado)
+        eje.setPen(pg.mkPen("k", width=2))
+        eje.setTextPen("k")
+        eje.setStyle(tickFont=fuente)
+    w.showGrid(x=True, y=True, alpha=0.25)
+    w.setMouseEnabled(False, False)
+    w.hideButtons()
+    w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+    w.setMinimumHeight(alto_minimo)
+    return w
+
+
+def eje_derecho(w: pg.PlotWidget, color_izq: str, color_der: str) -> pg.ViewBox:
+    """Segundo eje Y a la derecha, con su propia escala; cada eje, del color de
+    su curva."""
+    pi = w.plotItem
+    vista = pg.ViewBox()
+    pi.showAxis("right")
+    pi.scene().addItem(vista)
+    der = pi.getAxis("right")
+    der.linkToView(vista)
+    vista.setXLink(pi)
+    fuente = QFont()
+    fuente.setPointSize(PT)
+    fuente.setBold(True)
+    der.setPen(pg.mkPen("k", width=2))
+    der.setStyle(tickFont=fuente)
+    der.setTextPen(color_der)
+    pi.getAxis("left").setTextPen(color_izq)
+    vista.setMouseEnabled(False, False)
+
+    def sincronizar() -> None:
+        vista.setGeometry(pi.vb.sceneBoundingRect())
+        vista.linkedViewChanged(pi.vb, vista.XAxis)
+
+    pi.vb.sigResized.connect(sincronizar)
+    sincronizar()
+    return vista
+
+
+class TarjetaEnergia(QFrame):
+    """Lo común de las tres: título, ventana, valores y curvas. Cada variante
+    arma su cuerpo en `armar`."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("tarjeta")
+        self.setStyleSheet("#tarjeta { border: 2px solid #555; border-radius: 4px; }")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(6, 4, 6, 4)
+        v.setSpacing(2)
+        cab = QHBoxLayout()
+        cab.addWidget(label("Energía", negrita=True, pt=PT + 2))
+        cab.addStretch(1)
+        self.combo = combo_ventana()
+        self.combo.currentIndexChanged.connect(lambda _: self.poner_modo(self.combo.currentData()))
+        cab.addWidget(self.combo)
+        v.addLayout(cab)
+        self.curvas: dict = {}
+        self.plots: list[pg.PlotWidget] = []
+        self.vistas: list[pg.ViewBox] = []
+        # nombre → (label, prefijo html, con unidad)
+        self.valores: dict[str, tuple[QLabel, str, bool]] = {}
+        self.armar(v)
+        self.poner_modo(120)
+
+    def armar(self, v: QVBoxLayout) -> None:
+        raise NotImplementedError
+
+    def valor(self, nombre: str, prefijo: str = "", con_unidad: bool = True, **kw) -> QLabel:
+        lb = label("—", negrita=True, **kw)
+        lb.setToolTip(ETIQUETA.get(nombre, nombre))
+        self.valores[nombre] = (lb, prefijo, con_unidad)
+        return lb
+
+    def fila_abajo(self) -> QHBoxLayout:
+        """Panel y rendimiento, sin gráfico: la escala del panel aplastaría las
+        otras curvas."""
+        h = QHBoxLayout()
+        h.setSpacing(10)
+        h.addWidget(label(corto("tension_panel")))  # SOLAR, una sola vez
+        h.addWidget(self.valor("tension_panel"))
+        h.addWidget(self.valor("corriente_panel"))
+        h.addStretch(1)
+        h.addWidget(label(ETIQUETA["rendimiento"]))
+        h.addWidget(self.valor("rendimiento"))
+        return h
+
+    def poner_modo(self, modo) -> None:
+        if modo in ("vivo", "historico"):
+            modo = 120 if modo == "vivo" else None
+        self.modo = modo
+        self.combo.blockSignals(True)
+        self.combo.setCurrentIndex([s for _, s in VENTANAS].index(modo))
+        self.combo.blockSignals(False)
+        for w in self.plots:
+            w.setMouseEnabled(modo is None, modo is None)
+            w.enableAutoRange()
+        for vista in self.vistas:
+            vista.enableAutoRange()
+
+    def actualizar(self, sim: Simulador, datos: dict) -> None:
+        for nombre, (lb, prefijo, con_unidad) in self.valores.items():
+            lb.setText(prefijo + fmt_energia(nombre, valor_energia(nombre, datos), con_unidad))
+        if self.modo is None and sim.t_lanzamiento is not None:
+            inicio = sim.t_lanzamiento
+        else:
+            inicio = sim.tiempos[-1] - (self.modo or HISTORIA)
+        refrescar_curvas(sim, self.curvas, inicio)
+
+
+def marca(nombre: str, texto: str | None = None) -> str:
+    """Texto del color de la curva de su canal: hace de leyenda."""
+    color = COLOR_CANAL[canal(nombre)]
+    return f"<span style='color:{color}'>{texto or ETIQUETA[nombre]}</span>"
+
+
+class EnergiaPorMagnitud(TarjetaEnergia):
+    """G2A: un gráfico de tensión y otro de corriente, batería y barra en cada
+    uno, con los valores al lado. Lo que pide la #23."""
+
+    def armar(self, v: QVBoxLayout) -> None:
+        h = QHBoxLayout()
+        h.setSpacing(6)
+        for grupo in (TENSIONES, CORRIENTES):
+            w = plot_energia()
+            self.plots.append(w)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            col.addStretch(1)
+            for nombre in grupo:
+                pen = pg.mkPen(COLOR_CANAL[canal(nombre)], width=TRAZO)
+                self.curvas[nombre] = w.plot(pen=pen)
+                col.addWidget(label(marca(nombre)))
+                col.addWidget(self.valor(nombre, alinear=Qt.AlignmentFlag.AlignRight))
+                col.addSpacing(6)
+            col.addStretch(1)
+            h.addWidget(w, 1)
+            h.addLayout(col)
+        v.addLayout(h, 1)
+        v.addLayout(self.fila_abajo())
+
+
+class EnergiaPorCanal(TarjetaEnergia):
+    """G2B: una fila por canal; cada gráfico con la tensión en el eje izquierdo
+    y la corriente en el derecho."""
+
+    def armar(self, v: QVBoxLayout) -> None:
+        cv, ca = COLORES["uno"], COLORES["dos"]
+        for tension, corriente in CANALES[:2]:
+            h = QHBoxLayout()
+            h.setSpacing(6)
+            col = QVBoxLayout()
+            col.setSpacing(0)
+            col.addWidget(label(corto(tension), negrita=True, pt=PT + 2))
+            col.addWidget(self.valor(tension, f"<span style='color:{cv}'>V</span>&nbsp;"))
+            col.addWidget(self.valor(corriente, f"<span style='color:{ca}'>A</span>&nbsp;"))
+            col.addStretch(1)
+            caja = QWidget()
+            caja.setLayout(col)
+            caja.setFixedWidth(130)
+            h.addWidget(caja)
+            w = plot_energia(60)
+            vista = eje_derecho(w, cv, ca)
+            self.plots.append(w)
+            self.vistas.append(vista)
+            self.curvas[tension] = w.plot(pen=pg.mkPen(cv, width=TRAZO))
+            curva = pg.PlotCurveItem(pen=pg.mkPen(ca, width=TRAZO))
+            vista.addItem(curva)
+            self.curvas[corriente] = curva
+            h.addWidget(w, 1)
+            v.addLayout(h, 1)
+        v.addLayout(self.fila_abajo())
+
+    def actualizar(self, sim: Simulador, datos: dict) -> None:
+        super().actualizar(sim, datos)
+        if self.modo is None:  # en Misión manda el zoom del usuario
+            return
+        for w, vista, (tension, corriente) in zip(self.plots, self.vistas, CANALES, strict=False):
+            rango_minimo(w.plotItem.vb, self.curvas[tension], 0.2)
+            rango_minimo(vista, self.curvas[corriente], 0.1)
+
+
+def rango_minimo(vista: pg.ViewBox, curva, minimo: float) -> None:
+    """Autoescala, pero sin bajar de `minimo`: si no, el ruido del INA3221
+    (unos 0.01 V) se ve como un salto."""
+    _, ys = curva.getData()
+    datos = [y for y in (ys if ys is not None else []) if not math.isnan(y)]
+    if not datos:
+        return
+    bajo, alto = min(datos), max(datos)
+    if alto - bajo < minimo:
+        centro = (bajo + alto) / 2
+        vista.setYRange(centro - minimo / 2, centro + minimo / 2, padding=0)
+    else:
+        vista.enableAutoRange(axis=pg.ViewBox.YAxis)
+
+
+class EnergiaNumeros(TarjetaEnergia):
+    """G2C: los números mandan. Tabla canal × V, A, W, el rendimiento grande, y
+    dos gráficos angostos de tensión y corriente al costado."""
+
+    def armar(self, v: QVBoxLayout) -> None:
+        h = QHBoxLayout()
+        h.setSpacing(8)
+        izq = QVBoxLayout()
+        izq.setSpacing(2)
+        tabla = QGridLayout()
+        tabla.setHorizontalSpacing(14)
+        tabla.setVerticalSpacing(0)
+        for c, titulo in enumerate(("V", "A", "W"), start=1):
+            tabla.addWidget(label(titulo, negrita=True, alinear=Qt.AlignmentFlag.AlignRight), 0, c)
+        derecha = Qt.AlignmentFlag.AlignRight
+        for f, (tension, corriente) in enumerate(CANALES, start=1):
+            tabla.addWidget(label(marca(tension, corto(tension)), negrita=True), f, 0)
+            potencia = f"potencia_{canal(tension)}"
+            for c, nombre in enumerate((tension, corriente, potencia), start=1):
+                tabla.addWidget(self.valor(nombre, con_unidad=False, alinear=derecha), f, c)
+        izq.addLayout(tabla)
+        izq.addStretch(1)
+        rend = QHBoxLayout()
+        rend.addWidget(label(ETIQUETA["rendimiento"]))
+        rend.addStretch(1)
+        rend.addWidget(self.valor("rendimiento", pt=PT + 8))
+        izq.addLayout(rend)
+        h.addLayout(izq)
+        graficos = QVBoxLayout()
+        graficos.setSpacing(2)
+        for grupo in (TENSIONES, CORRIENTES):
+            w = plot_energia(60)
+            self.plots.append(w)
+            for nombre in grupo:
+                pen = pg.mkPen(COLOR_CANAL[canal(nombre)], width=TRAZO)
+                self.curvas[nombre] = w.plot(pen=pen)
+            graficos.addWidget(w, 1)
+        h.addLayout(graficos, 1)
+        v.addLayout(h, 1)
+
+
+class VarianteG2A(VarianteG2):
+    nombre = "Ronda 5 (#23): energía por magnitud"
+
+    def tarjeta_energia(self) -> QFrame:
+        return EnergiaPorMagnitud()
+
+
+class VarianteG2B(VarianteG2):
+    nombre = "Ronda 5 (#23): energía por canal"
+
+    def tarjeta_energia(self) -> QFrame:
+        return EnergiaPorCanal()
+
+
+class VarianteG2C(VarianteG2):
+    nombre = "Ronda 5 (#23): energía, números primero"
+
+    def tarjeta_energia(self) -> QFrame:
+        return EnergiaNumeros()
+
+
 # --- ventana y selector de variante ---------------------------------------
 
 VARIANTES = {
@@ -1540,6 +1939,9 @@ VARIANTES = {
     "G": VarianteG,
     "G2": VarianteG2,
     "G3": VarianteG3,
+    "G2A": VarianteG2A,
+    "G2B": VarianteG2B,
+    "G2C": VarianteG2C,
 }
 
 
@@ -1600,6 +2002,7 @@ class Ventana(QMainWindow):
             Qt.Key.Key_F2: lambda: self.falla("crc"),
             Qt.Key.Key_F3: lambda: self.falla("gps"),
             Qt.Key.Key_F4: lambda: self.falla("bateria"),
+            "Shift+F4": lambda: self.falla("ina"),
             Qt.Key.Key_F10: lambda: self.falla("reinicio"),
         }
         for i, fase in enumerate(FASES):
@@ -1660,6 +2063,9 @@ class Ventana(QMainWindow):
         elif que == "bateria":
             s.bateria_baja = not s.bateria_baja
             texto = "Batería baja" if s.bateria_baja else "Batería normal"
+        elif que == "ina":
+            s.ina_sin_dato = not s.ina_sin_dato
+            texto = "BAT_CURRENT sin dato" if s.ina_sin_dato else "BAT_CURRENT con dato"
         else:
             s.reinicio = 3
             texto = "Reinicio de la FSW: 3 s sin transmitir"
@@ -1742,14 +2148,14 @@ ESTILO = (
 
 
 def main() -> None:
-    inicial = (sys.argv[1] if len(sys.argv) > 1 else "D").upper()
+    inicial = (sys.argv[1] if len(sys.argv) > 1 else "G2B").upper()
     app = QApplication(sys.argv)
     f = app.font()
     f.setPointSize(PT)
     app.setFont(f)
     app.setStyleSheet(ESTILO)
     configurar_pyqtgraph()
-    v = Ventana(inicial if inicial in VARIANTES else "D")
+    v = Ventana(inicial if inicial in VARIANTES else "G2B")
     v.resize(1366, 768)  # el mínimo de #4, en píxeles lógicos
     v.show()
     sys.exit(app.exec())
