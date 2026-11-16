@@ -3383,6 +3383,7 @@ class Ventana(QMainWindow):
         # Controles para probar la simulación (ver el encabezado).
         self.velocidad = 1
         self.pausado = False
+        self.aviso = ""  # el aviso que se muestra en el título
         teclas = {
             Qt.Key.Key_F5: self.reiniciar,
             Qt.Key.Key_Space: self.pausar,
@@ -3406,10 +3407,20 @@ class Ventana(QMainWindow):
     def actualizar_titulo(self) -> None:
         nota = "Simulated data" + ("; provisional format" if FORMATO.get("provisorio") else "")
         marcha = "PAUSED" if self.pausado else f"×{self.velocidad}"
-        self.setWindowTitle(f"Avutardo GCS — PROTOTYPE — {nota} — {marcha}")
+        aviso = f" — {self.aviso}" if self.aviso else ""
+        self.setWindowTitle(f"Avutardo GCS — PROTOTYPE — {nota} — {marcha}{aviso}")
 
     def avisar(self, texto: str) -> None:
-        self.statusBar().showMessage(texto, 3000)
+        """El aviso va en el título por 3 s. No en la barra de estado: al
+        crearla, la ventana crece 18 px y deja de entrar en 768."""
+        self.aviso = texto
+        self.actualizar_titulo()
+        QTimer.singleShot(3000, lambda: self.borrar_aviso(texto))
+
+    def borrar_aviso(self, texto: str) -> None:
+        if self.aviso == texto:  # si llegó otro aviso, ése sigue sus 3 s
+            self.aviso = ""
+            self.actualizar_titulo()
 
     def arranque_en_frio(self) -> None:
         """Shift+F5: la estación abre sin paquetes y la FSW tarda 10 s (#24, Q3)."""
@@ -3509,7 +3520,6 @@ class Ventana(QMainWindow):
         self.poner(self.actual)
         if consola:
             self.vista.boton.setChecked(True)
-        # Sin avisar(): la barra de estado le suma 31 px de alto a la ventana.
 
     def ciclar(self, paso: int) -> None:
         i = (self.claves.index(self.actual) + paso) % len(self.claves)
@@ -3557,7 +3567,7 @@ class Ventana(QMainWindow):
         self.selector.show()
         destino = CAPTURAS / f"variante-{self.actual}.png"
         imagen.save(str(destino))
-        self.statusBar().showMessage(f"Screenshot: {destino}", 3000)
+        self.avisar(f"Screenshot: {destino.name}")
 
     def ubicar_selector(self) -> None:
         s = self.selector
