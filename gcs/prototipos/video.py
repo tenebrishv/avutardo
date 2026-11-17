@@ -30,6 +30,10 @@ VELOCIDAD = 2  # segundos de vuelo por segundo de video
 FIN = 198  # segundos de la notebook: 10 s después de LANDED, y 1:39 de video
 DIALOGO = range(12, 15)  # el diálogo de CAL_ALT, antes de que salga a los 15 s
 CONSOLA = range(56, 72)  # el CRC roto llega a los 60 s (30 desde el despegue)
+# Con el tema light, se pasa a high contrast desde el pie en pleno descenso y se
+# vuelve: muestra el tema que mejor se leyó al sol y que cambiarlo no corta el vuelo.
+OTRO_TEMA = "high contrast"
+CAMBIO_TEMA = range(140, 160)
 
 # Segundo de la notebook desde el que se muestra cada subtítulo. El vuelo de
 # demostración es siempre el mismo: despegue a los 30 s, eyección a los 42 s,
@@ -46,8 +50,9 @@ SUBTITULOS = {
     56: "La consola muestra cada paquete crudo: acá llega uno con el CRC roto (Discarded).",
     72: "DESCENT_2: DESCENT2_STATUS pasa a TRIGGERED y la velocidad de bajada se compara con C4.",
     100: "El enlace: RSSI, SNR, piso de ruido estimado y PER, todo calculado en la notebook.",
-    140: "Tema light por defecto (G12). En la prueba al sol del 2026-11-16 "
-    "se leyó mejor high contrast: se elige desde el pie.",
+    140: "High contrast, el que mejor se leyó en la prueba al sol del 2026-11-16: "
+    "se cambia desde el pie sin cortar el vuelo.",
+    160: "De vuelta al tema light, el de por defecto (G12).",
     176: "LANDED: el QR lleva la última posición a Google Maps para ir a buscarlo.",
 }
 
@@ -122,6 +127,15 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as carpeta:
         n = 0
         while v.sim.reloj < FIN:
+            tema = OTRO_TEMA if args.tema == "light" and v.sim.reloj in CAMBIO_TEMA else args.tema
+            if v.tema != tema:
+                v.cambiar_tema(tema)
+                # pyqtgraph mide el ancho de los números del eje al dibujar: sin
+                # este dibujado de prueba, el primer cuadro sale con los ejes vacíos.
+                for _ in range(2):
+                    v.refrescar()
+                    app.processEvents()
+                    p.imagen(v)
             consola = v.sim.reloj in CONSOLA
             if v.vista.boton.isChecked() != consola:
                 v.vista.boton.setChecked(consola)
